@@ -87,4 +87,19 @@
         <cve>CVE-2026-33166</cve>
     </suppress>
 
+
+    <!--
+      Dependency-Check maps the Allure Java lifecycle adapter to the report-generator CPE.
+      This adapter writes test results but does not implement report generation or attachment
+      readers. The actual Allure report runtime is pinned to patched version 2.38.0.
+    -->
+    <suppress>
+        <notes><![CDATA[
+            False-positive CPE association for allure-java-commons and CVE-2026-33166.
+            This Java lifecycle/results-writer adapter does not contain the vulnerable
+            report-generator attachment reader. The Maven report runtime is 2.38.0.
+        ]]></notes>
+        <packageUrl regex="true">^pkg:maven/io\.qameta\.allure/allure-java-commons@.*$</packageUrl>
+        <cve>CVE-2026-33166</cve>
+    </suppress>
 </suppressions>
