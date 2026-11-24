@@ -1,0 +1,46 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<suppressions xmlns="https://jeremylong.github.io/DependencyCheck/dependency-suppression.1.3.xsd">
+    <!--
+      Accepted Vulnerability Exceptions
+      Each suppression documented here must describe why the vulnerability is not
+      exploitable within the context of this test automation framework.
+    -->
+
+    <!--
+      org.mozilla:rhino:1.7.7.2 (Transitive dependency via com.github.java-json-tools:json-schema-validator)
+      Context: Pulled strictly in test scope by REST Assured JSON Schema Validator (2.2.14)
+      for ECMA-262 regular expression parsing in schema constraints.
+      Exploitability: Non-applicable / False Positive. The framework does not execute
+      arbitrary or untrusted JavaScript via Rhino. All schema files reside locally in
+      src/test/resources/schemas/ and are authored internally.
+    -->
+    <suppress>
+        <notes><![CDATA[
+            Suppression for Rhino JavaScript execution CVE-2024-41991.
+            Rhino is used exclusively in test scope by json-schema-validator for regex
+            format validation; arbitrary untrusted scripts are never evaluated.
+        ]]></notes>
+        <packageUrl regex="true">^pkg:maven/org\.mozilla/rhino@.*$</packageUrl>
+        <cve>CVE-2024-41991</cve>
+    </suppress>
+
+    <suppress>
+        <notes><![CDATA[
+            Suppression for Rhino JavaScript execution CVE-2022-45143.
+            Rhino is used exclusively in test scope by json-schema-validator for regex
+            format validation; arbitrary untrusted scripts are never evaluated.
+        ]]></notes>
+        <packageUrl regex="true">^pkg:maven/org\.mozilla/rhino@.*$</packageUrl>
+        <cve>CVE-2022-45143</cve>
+    </suppress>
+
+    <suppress>
+        <notes><![CDATA[
+            Suppression for legacy Rhino JavaScript execution CVE-2016-10764.
+            Rhino is used exclusively in test scope by json-schema-validator for regex
+            format validation; arbitrary untrusted scripts are never evaluated.
+        ]]></notes>
+        <packageUrl regex="true">^pkg:maven/org\.mozilla/rhino@.*$</packageUrl>
+        <cve>CVE-2016-10764</cve>
+    </suppress>
+</suppressions>

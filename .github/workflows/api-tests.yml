@@ -28,17 +28,20 @@ jobs:
 
     steps:
       - name: Checkout Code
-        uses: actions/checkout@v4
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        timeout-minutes: 2
 
       - name: Set up JDK 21
-        uses: actions/setup-java@v4
+        uses: actions/setup-java@3a4f6e1af504cf6a31855fa899c6aa5355ba6c12 # v4.7.0
         with:
           java-version: '21'
           distribution: 'temurin'
           cache: 'maven'
+        timeout-minutes: 3
 
       - name: Determine Test Execution Strategy
         id: select-strategy
+        timeout-minutes: 1
         env:
           EVENT_NAME: ${{ github.event_name }}
           INPUT_PROFILE: ${{ inputs.test_profile }}
@@ -47,15 +50,15 @@ jobs:
             case "$INPUT_PROFILE" in
               offline)
                 echo "target=offline" >> "$GITHUB_OUTPUT"
-                echo "description=Running deterministic offline test suite (59 tests, zero external network requests)" >> "$GITHUB_OUTPUT"
+                echo "description=Running deterministic offline test suite (zero external network requests)" >> "$GITHUB_OUTPUT"
                 ;;
               integration)
                 echo "target=integration" >> "$GITHUB_OUTPUT"
-                echo "description=Running live integration test suite against DummyJSON (49 tests - requires internet connectivity)" >> "$GITHUB_OUTPUT"
+                echo "description=Running live integration test suite against DummyJSON (requires internet connectivity)" >> "$GITHUB_OUTPUT"
                 ;;
               all)
                 echo "target=all" >> "$GITHUB_OUTPUT"
-                echo "description=Running complete test suite including offline and live integration tests (108 tests)" >> "$GITHUB_OUTPUT"
+                echo "description=Running complete test suite including offline and live integration tests" >> "$GITHUB_OUTPUT"
                 ;;
               *)
                 echo "Error: Unknown test profile '$INPUT_PROFILE'" >&2
@@ -64,17 +67,19 @@ jobs:
             esac
           else
             echo "target=offline" >> "$GITHUB_OUTPUT"
-            echo "description=Running default push/PR offline test suite (59 tests - zero external network requests)" >> "$GITHUB_OUTPUT"
+            echo "description=Running default push/PR offline test suite (zero external network requests)" >> "$GITHUB_OUTPUT"
           fi
 
       - name: Execute Offline Tests & Quality Checks
         if: steps.select-strategy.outputs.target == 'offline'
+        timeout-minutes: 10
         run: |
           echo "Strategy: ${{ steps.select-strategy.outputs.description }}"
           mvn clean verify -Poffline --batch-mode
 
       - name: Execute Integration Tests & Quality Checks
         if: steps.select-strategy.outputs.target == 'integration'
+        timeout-minutes: 10
         run: |
           echo "Strategy: ${{ steps.select-strategy.outputs.description }}"
           echo "NOTE: Active internet connectivity and DummyJSON API availability are required."
@@ -82,18 +87,21 @@ jobs:
 
       - name: Execute Complete Test Suite & Quality Checks
         if: steps.select-strategy.outputs.target == 'all'
+        timeout-minutes: 15
         run: |
           echo "Strategy: ${{ steps.select-strategy.outputs.description }}"
-          echo "NOTE: Running complete test suite (108 executions). Active internet connectivity and DummyJSON API availability are required for integration tests."
+          echo "NOTE: Running complete test suite. Active internet connectivity and DummyJSON API availability are required for integration tests."
           mvn clean verify --batch-mode
 
       - name: Generate Allure Report
         if: always()
+        timeout-minutes: 3
         run: mvn allure:report --batch-mode
 
       - name: Upload Surefire and Execution Logs
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@4cec3d8aa04e39d1a68397de0c4cd6fb9dce8ec1 # v4.6.1
         if: always()
+        timeout-minutes: 3
         with:
           name: test-execution-artifacts
           path: |
@@ -104,17 +112,63 @@ jobs:
           retention-days: 14
 
       - name: Upload Allure Raw Results
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@4cec3d8aa04e39d1a68397de0c4cd6fb9dce8ec1 # v4.6.1
         if: always()
+        timeout-minutes: 3
         with:
           name: allure-raw-results
           path: target/allure-results/
           retention-days: 14
 
       - name: Upload Allure HTML Report
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@4cec3d8aa04e39d1a68397de0c4cd6fb9dce8ec1 # v4.6.1
         if: always()
+        timeout-minutes: 3
         with:
           name: allure-html-report
           path: target/site/allure-maven-plugin/
+          retention-days: 14
+
+  dependency-security-scan:
+    name: Dependency Vulnerability Scan
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        timeout-minutes: 2
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@3a4f6e1af504cf6a31855fa899c6aa5355ba6c12 # v4.7.0
+        with:
+          java-version: '21'
+          distribution: 'temurin'
+          cache: 'maven'
+        timeout-minutes: 3
+
+      - name: Execute OWASP Dependency-Check
+        timeout-minutes: 10
+        env:
+          NVD_API_KEY: ${{ secrets.NVD_API_KEY }}
+        run: |
+          echo "Executing OWASP Dependency-Check vulnerability analysis..."
+          mvn org.owasp:dependency-check-maven:check \
+            -DfailBuildOnCVSS=7.0 \
+            -DsuppressionFiles=dependency-check-suppressions.xml \
+            -Dformats=HTML,JSON \
+            -DassemblyAnalyzerEnabled=false \
+            --batch-mode
+
+      - name: Upload Dependency Check Report
+        uses: actions/upload-artifact@4cec3d8aa04e39d1a68397de0c4cd6fb9dce8ec1 # v4.6.1
+        if: always()
+        timeout-minutes: 3
+        with:
+          name: dependency-check-report
+          path: |
+            target/dependency-check-report.html
+            target/dependency-check-report.json
           retention-days: 14

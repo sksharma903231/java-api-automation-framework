@@ -6,9 +6,12 @@ target/
 
 # Execution logs and Allure outputs
 logs/
+*.log
 allure-results/
 allure-report/
 .allure/
+.env
+.env.*
 
 ### IntelliJ IDEA ###
 .idea/

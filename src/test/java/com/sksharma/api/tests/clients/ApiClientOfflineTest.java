@@ -11,9 +11,14 @@ import io.qameta.allure.Severity;
 import io.qameta.allure.SeverityLevel;
 import io.qameta.allure.Story;
 import io.restassured.builder.RequestSpecBuilder;
+import io.restassured.config.HttpClientConfig;
+import io.restassured.config.RedirectConfig;
+import io.restassured.config.RestAssuredConfig;
 import io.restassured.path.json.exception.JsonPathException;
 import io.restassured.response.Response;
+import io.restassured.specification.FilterableRequestSpecification;
 import io.restassured.specification.RequestSpecification;
+import com.sksharma.api.clients.RequestSpecFactory;
 import org.testng.annotations.AfterClass;
 import org.testng.annotations.AfterMethod;
 import org.testng.annotations.BeforeClass;
@@ -499,6 +504,166 @@ public class ApiClientOfflineTest {
                 });
     }
 
+    @Test(description = "Verify connection failure when server abruptly terminates connection without responding")
+    @Story("Error & Edge Cases")
+    @Severity(SeverityLevel.CRITICAL)
+    @Description("Verifies that when a local server abruptly closes an exchange without headers, an I/O exception is caught cleanly.")
+    public void testConnectionFailureOnAbruptServerDisconnection() {
+        server.registerHandler("/api/negative/abrupt-close", exchange -> {
+            exchange.close();
+        });
+
+        assertThatThrownBy(() -> apiClient.get("/api/negative/abrupt-close"))
+                .isInstanceOf(IOException.class);
+    }
+
+    @Test(description = "Verify unregistered endpoint returns HTTP 404 Not Found")
+    @Story("Error & Edge Cases")
+    @Severity(SeverityLevel.NORMAL)
+    @Description("Verifies that requesting an unregistered path returns HTTP 404 without client failure.")
+    public void testUnregisteredEndpointReturns404NotFound() {
+        Response response = apiClient.get("/api/negative/non-existent-route-404");
+
+        assertThat(response.getStatusCode()).isEqualTo(404);
+        assertThat(response.asString()).isNotNull();
+    }
+
+    @Test(description = "Verify HTTP 503 Service Unavailable error response handling")
+    @Story("Error & Edge Cases")
+    @Severity(SeverityLevel.CRITICAL)
+    @Description("Verifies that ApiClient correctly processes HTTP 503 Service Unavailable responses with error JSON.")
+    public void testResponseStatus503ServiceUnavailable() {
+        server.registerJsonResponse("/api/negative/503", 503, "{\"error\":\"Service Unavailable\",\"retryAfter\":30}");
+
+        Response response = apiClient.get("/api/negative/503");
+
+        assertThat(response.getStatusCode()).isEqualTo(503);
+        assertThat(response.jsonPath().getString("error")).isEqualTo("Service Unavailable");
+        assertThat(response.jsonPath().getInt("retryAfter")).isEqualTo(30);
+    }
+
+    @Test(description = "Verify HTTP 504 Gateway Timeout error response handling")
+    @Story("Error & Edge Cases")
+    @Severity(SeverityLevel.CRITICAL)
+    @Description("Verifies that ApiClient correctly processes HTTP 504 Gateway Timeout responses.")
+    public void testResponseStatus504GatewayTimeout() {
+        server.registerJsonResponse("/api/negative/504", 504, "{\"error\":\"Gateway Timeout\"}");
+
+        Response response = apiClient.get("/api/negative/504");
+
+        assertThat(response.getStatusCode()).isEqualTo(504);
+        assertThat(response.jsonPath().getString("error")).isEqualTo("Gateway Timeout");
+    }
+
+    @Test(description = "Verify unexpected binary content type response is readable as byte array")
+    @Story("Error & Edge Cases")
+    @Severity(SeverityLevel.NORMAL)
+    @Description("Verifies that unexpected binary payload (application/octet-stream) is handled cleanly without corruption.")
+    public void testUnexpectedBinaryContentTypeResponse() {
+        byte[] binaryData = new byte[]{0x00, 0x01, 0x02, (byte) 0xFF, (byte) 0xFE};
+        server.registerHandler("/api/negative/binary-data", exchange -> {
+            exchange.getResponseHeaders().set("Content-Type", "application/octet-stream");
+            exchange.sendResponseHeaders(200, binaryData.length);
+            try (OutputStream os = exchange.getResponseBody()) {
+                os.write(binaryData);
+            }
+        });
+
+        Response response = apiClient.get("/api/negative/binary-data");
+
+        assertThat(response.getStatusCode()).isEqualTo(200);
+        assertThat(response.getContentType()).contains("application/octet-stream");
+        assertThat(response.asByteArray()).isEqualTo(binaryData);
+    }
+
+    @Test(description = "Verify truncated JSON response body fails gracefully on parsing")
+    @Story("Error & Edge Cases")
+    @Severity(SeverityLevel.CRITICAL)
+    @Description("Verifies that truncated JSON response returns 200 OK, preserves raw body, and fails gracefully when parsed as JSON.")
+    public void testTruncatedJsonResponseHandling() {
+        String truncatedJson = "{\"id\":42,\"status\":";
+        server.registerTextResponse("/api/negative/truncated-json", 200, "application/json", truncatedJson);
+
+        Response response = apiClient.get("/api/negative/truncated-json");
+
+        assertThat(response.getStatusCode()).isEqualTo(200);
+        assertThat(response.asString()).isEqualTo(truncatedJson);
+        assertThatThrownBy(() -> response.jsonPath().getInt("id"))
+                .isInstanceOf(JsonPathException.class);
+    }
+
+    @Test(description = "Verify whitespace-only response body handling")
+    @Story("Error & Edge Cases")
+    @Severity(SeverityLevel.NORMAL)
+    @Description("Verifies that a 200 OK response with whitespace-only body is handled gracefully without deserialization crash.")
+    public void testWhitespaceOnlyResponseBodyHandling() {
+        server.registerTextResponse("/api/negative/whitespace-body", 200, "application/json", "   \t\n   ");
+
+        Response response = apiClient.get("/api/negative/whitespace-body");
+
+        assertThat(response.getStatusCode()).isEqualTo(200);
+        assertThat(response.asString().trim()).isEmpty();
+    }
+
+    @Test(description = "Verify read timeout during POST request with body")
+    @Story("Error & Edge Cases")
+    @Severity(SeverityLevel.CRITICAL)
+    @Description("Verifies that a POST request with payload triggers SocketTimeoutException when server delay exceeds configured timeout.")
+    public void testReadTimeoutDuringPostWithPayload() {
+        server.registerJsonResponse("/api/negative/post-timeout", 200, "{\"status\":\"delayed\"}", Duration.ofMillis(2500));
+        System.setProperty("http.timeout.seconds", "1");
+        ConfigManager.reset();
+
+        assertThatThrownBy(() -> apiClient.post("/api/negative/post-timeout", Map.of("data", "timeout-test")))
+                .satisfies(throwable -> {
+                    boolean isTimeout = throwable instanceof SocketTimeoutException
+                            || (throwable.getCause() instanceof SocketTimeoutException);
+                    assertThat(isTimeout)
+                            .as("Expected SocketTimeoutException directly or as cause, got %s", throwable.getClass().getName())
+                            .isTrue();
+                });
+    }
+
+    @Test(description = "Verify all HTTP methods enforce destination validation and reject unapproved destinations")
+    @Story("Error & Edge Cases")
+    @Severity(SeverityLevel.BLOCKER)
+    @Description("Verifies that post, put, patch, and delete all enforce pre-dispatch validation and throw on unapproved destination.")
+    public void testAllHttpMethodsRejectUnapprovedDestination() {
+        String unapproved = "https://unapproved-blocked-host.com/api/test";
+        server.clearCapturedRequests();
+
+        assertThatThrownBy(() -> apiClient.post(unapproved, Map.of("k", "v")))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("unapproved-blocked-host.com");
+
+        assertThatThrownBy(() -> apiClient.put(unapproved, Map.of("k", "v")))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("unapproved-blocked-host.com");
+
+        assertThatThrownBy(() -> apiClient.patch(unapproved, Map.of("k", "v")))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("unapproved-blocked-host.com");
+
+        assertThatThrownBy(() -> apiClient.delete(unapproved))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("unapproved-blocked-host.com");
+
+        assertThat(server.getCapturedRequests()).isEmpty();
+    }
+
+    @Test(description = "Verify malformed URI syntax in endpoint is rejected before dispatch")
+    @Story("Error & Edge Cases")
+    @Severity(SeverityLevel.CRITICAL)
+    @Description("Verifies that passing a malformed URI syntax in endpoint throws an exception before any network call.")
+    public void testMalformedUriSyntaxInEndpointRejectedBeforeDispatch() {
+        server.clearCapturedRequests();
+
+        assertThatThrownBy(() -> apiClient.get("http://invalid [host]/api"))
+                .isInstanceOf(Exception.class);
+
+        assertThat(server.getCapturedRequests()).isEmpty();
+    }
+
     // ==========================================
     // 5. Thread Safety Tests
     // ==========================================
@@ -566,5 +731,408 @@ public class ApiClientOfflineTest {
 
         List<CapturedRequest> captured = server.getRequestsForPath("/api/concurrent");
         assertThat(captured).hasSize(threadCount);
+    }
+
+    @Test(description = "Verify parallel requests with distinct headers, query params, auth, and bodies do not leak cross-thread")
+    @Story("Concurrency & Thread Safety")
+    @Severity(SeverityLevel.BLOCKER)
+    @Description("Dispatches concurrent POST requests across 10 threads with distinct headers, bearer tokens, query params, and bodies, verifying complete thread isolation.")
+    public void testParallelRequestsDoNotLeakHeadersQueryParamsAuthOrBodies() throws InterruptedException {
+        int threadCount = 10;
+        server.registerHandler("/api/concurrent-isolation", exchange -> {
+            String query = exchange.getRequestURI().getRawQuery();
+            String queryWorker = "";
+            if (query != null && query.contains("workerId=")) {
+                queryWorker = query.substring(query.indexOf("workerId=") + "workerId=".length());
+                if (queryWorker.contains("&")) {
+                    queryWorker = queryWorker.substring(0, queryWorker.indexOf("&"));
+                }
+            }
+
+            String headerWorker = exchange.getRequestHeaders().getFirst("X-Worker-Correlation-ID");
+            String authHeader = exchange.getRequestHeaders().getFirst("Authorization");
+
+            // Verify intra-request coherence for headers and query parameters
+            boolean headerMatches = headerWorker != null && headerWorker.equals(queryWorker);
+            boolean authMatches = authHeader != null && authHeader.equals("Bearer token-" + queryWorker);
+
+            if (!headerMatches || !authMatches) {
+                String error = String.format("Cross-contamination detected: query=%s, header=%s, auth=%s",
+                        queryWorker, headerWorker, authHeader);
+                byte[] errBytes = error.getBytes(StandardCharsets.UTF_8);
+                exchange.getResponseHeaders().set("Content-Type", "text/plain");
+                exchange.sendResponseHeaders(409, errBytes.length);
+                try (OutputStream os = exchange.getResponseBody()) {
+                    os.write(errBytes);
+                }
+                return;
+            }
+
+            byte[] okBytes = ("{\"worker\":\"" + queryWorker + "\",\"status\":\"isolated\"}")
+                    .getBytes(StandardCharsets.UTF_8);
+            exchange.getResponseHeaders().set("Content-Type", "application/json");
+            exchange.sendResponseHeaders(200, okBytes.length);
+            try (OutputStream os = exchange.getResponseBody()) {
+                os.write(okBytes);
+            }
+        });
+
+        ExecutorService executor = Executors.newFixedThreadPool(threadCount);
+        CountDownLatch startLatch = new CountDownLatch(1);
+        CountDownLatch doneLatch = new CountDownLatch(threadCount);
+        List<String> receivedWorkerIds = Collections.synchronizedList(new ArrayList<>());
+        List<Throwable> errors = Collections.synchronizedList(new ArrayList<>());
+
+        for (int i = 1; i <= threadCount; i++) {
+            final String workerId = "thread-worker-" + i;
+            executor.submit(() -> {
+                try {
+                    startLatch.await();
+                    RequestSpecification threadSpec = new RequestSpecBuilder()
+                            .addHeader("X-Worker-Correlation-ID", workerId)
+                            .addHeader("Authorization", "Bearer token-" + workerId)
+                            .addQueryParam("workerId", workerId)
+                            .build();
+
+                    Map<String, Object> body = Map.of("worker", workerId, "index", 100);
+                    Response resp = apiClient.post("/api/concurrent-isolation", body, threadSpec);
+
+                    if (resp.getStatusCode() != 200) {
+                        throw new IllegalStateException("Expected 200, but got " + resp.getStatusCode()
+                                + ": " + resp.asString());
+                    }
+                    String returnedWorker = resp.jsonPath().getString("worker");
+                    if (!workerId.equals(returnedWorker)) {
+                        throw new IllegalStateException("Cross-thread contamination: expected " + workerId
+                                + " but got " + returnedWorker);
+                    }
+                    receivedWorkerIds.add(returnedWorker);
+                } catch (Throwable t) {
+                    errors.add(t);
+                } finally {
+                    doneLatch.countDown();
+                }
+            });
+        }
+
+        startLatch.countDown();
+        boolean completedInTime = doneLatch.await(15, TimeUnit.SECONDS);
+        executor.shutdown();
+
+        assertThat(completedInTime).as("All concurrent requests must complete within 15 seconds").isTrue();
+        assertThat(errors).as("No threads should encounter cross-contamination or errors: %s", errors).isEmpty();
+        assertThat(receivedWorkerIds).hasSize(threadCount);
+        for (int i = 1; i <= threadCount; i++) {
+            assertThat(receivedWorkerIds).contains("thread-worker-" + i);
+        }
+
+        List<CapturedRequest> captured = server.getRequestsForPath("/api/concurrent-isolation");
+        assertThat(captured).hasSize(threadCount);
+
+        for (CapturedRequest req : captured) {
+            String queryWorker = req.getFirstQueryParam("workerId");
+            String headerWorker = req.getFirstHeader("X-Worker-Correlation-ID");
+            String authHeader = req.getFirstHeader("Authorization");
+            String bodyText = req.getBodyText();
+
+            assertThat(headerWorker).isEqualTo(queryWorker);
+            assertThat(authHeader).isEqualTo("Bearer token-" + queryWorker);
+            assertThat(bodyText).contains("\"worker\":\"" + queryWorker + "\"");
+        }
+    }
+
+    @Test(description = "Verify configuration remains safely readable and consistent during parallel execution")
+    @Story("Concurrency & Thread Safety")
+    @Severity(SeverityLevel.CRITICAL)
+    @Description("Executes concurrent configuration property reads across 10 threads, confirming thread safety and zero race conditions.")
+    public void testConcurrentConfigInitializationAndReadability() throws InterruptedException {
+        int threadCount = 10;
+        int iterationsPerThread = 50;
+        ExecutorService executor = Executors.newFixedThreadPool(threadCount);
+        CountDownLatch startLatch = new CountDownLatch(1);
+        CountDownLatch doneLatch = new CountDownLatch(threadCount);
+        List<Throwable> errors = Collections.synchronizedList(new ArrayList<>());
+
+        for (int i = 0; i < threadCount; i++) {
+            executor.submit(() -> {
+                try {
+                    startLatch.await();
+                    for (int j = 0; j < iterationsPerThread; j++) {
+                        ConfigManager config = ConfigManager.getInstance();
+                        String baseUrl = config.getBaseUrl();
+                        int timeout = config.getHttpTimeoutSeconds();
+                        boolean loopback = config.isHostAllowed("127.0.0.1");
+                        boolean allowed = config.isHostAllowed("dummyjson.com");
+                        boolean denied = config.isHostAllowed("unapproved.com");
+
+                        if (baseUrl == null || baseUrl.isBlank()) {
+                            throw new IllegalStateException("baseUrl is null or blank");
+                        }
+                        if (timeout <= 0) {
+                            throw new IllegalStateException("timeout is not positive");
+                        }
+                        if (!loopback || !allowed || denied) {
+                            throw new IllegalStateException("Host allowlist returned inconsistent results");
+                        }
+                    }
+                } catch (Throwable t) {
+                    errors.add(t);
+                } finally {
+                    doneLatch.countDown();
+                }
+            });
+        }
+
+        startLatch.countDown();
+        boolean completedInTime = doneLatch.await(15, TimeUnit.SECONDS);
+        executor.shutdown();
+
+        assertThat(completedInTime).as("All configuration read threads must complete within timeout").isTrue();
+        assertThat(errors).as("No concurrent configuration read errors should occur: %s", errors).isEmpty();
+    }
+
+    // ==========================================
+    // 6. URL Security & Mode Policy Enforcement
+    // ==========================================
+
+    @Test(description = "Verify offline execution blocks requests targeting external hosts even if allowlisted")
+    @Story("URL Security & Mode Enforcement")
+    @Severity(SeverityLevel.BLOCKER)
+    @Description("Verifies that in offline mode, ApiClient blocks attempts to dispatch requests to external hosts like DummyJSON before any socket is opened.")
+    public void testOfflineExecutionBlocksExternalNetworkRequests() {
+        System.setProperty("test.profile", "offline");
+        ConfigManager.reset();
+
+        assertThatThrownBy(() -> apiClient.get("https://dummyjson.com/products"))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("Offline mode strictly prohibits external network calls to: dummyjson.com");
+    }
+
+    @Test(description = "Verify ApiClient rejects unapproved external hosts not in allowlist")
+    @Story("URL Security & Mode Enforcement")
+    @Severity(SeverityLevel.BLOCKER)
+    @Description("Verifies that ApiClient strictly rejects requests targeting unapproved external hosts before execution.")
+    public void testApiClientRejectsUnapprovedExternalHost() {
+        System.setProperty("test.profile", "integration");
+        ConfigManager.reset();
+
+        assertThatThrownBy(() -> apiClient.get("https://unapproved-external-host.com/api"))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("is not permitted by allowlist");
+    }
+
+    @Test(description = "Verify ApiClient rejects unsafe schemes like FTP or file URLs")
+    @Story("URL Security & Mode Enforcement")
+    @Severity(SeverityLevel.CRITICAL)
+    @Description("Verifies that ApiClient rejects non-http/https schemes such as ftp:// or file:// before execution.")
+    public void testApiClientRejectsUnsafeSchemeEndpoint() {
+        assertThatThrownBy(() -> apiClient.get("ftp://127.0.0.1:21/api"))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("must use http or https scheme");
+
+        assertThatThrownBy(() -> apiClient.get("file:///etc/passwd"))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("must use http or https scheme");
+    }
+
+    // ==========================================
+    // 7. Stage 3 — Security Controls, Custom Spec Isolation & Redirects
+    // ==========================================
+
+    @Test(description = "Verify allowed final destination succeeds and captured on test server")
+    @Story("Destination Validation")
+    @Severity(SeverityLevel.BLOCKER)
+    @Description("Verifies that combining base URL and a valid endpoint dispatches correctly to local server, returning 200.")
+    public void testAllowedFinalDestinationSucceeds() {
+        server.registerJsonResponse("/api/stage3/allowed", 200, "{\"destination\":\"allowed\"}");
+
+        Response response = apiClient.get("/api/stage3/allowed");
+
+        assertThat(response.getStatusCode()).isEqualTo(200);
+        assertThat(response.jsonPath().getString("destination")).isEqualTo("allowed");
+        assertThat(server.getLastRequest().getPath()).isEqualTo("/api/stage3/allowed");
+    }
+
+    @Test(description = "Verify validated destination executes against local test server with exact path and query")
+    @Story("Destination Validation")
+    @Severity(SeverityLevel.BLOCKER)
+    @Description("Proves that requests passing destination validation execute against the local test server with exact path and query parameters.")
+    public void testValidatedDestinationMatchesActualServerDestination() {
+        server.clearCapturedRequests();
+        server.registerJsonResponse("/api/stage3/match", 200, "{\"matched\":true}");
+
+        Response response = apiClient.get("/api/stage3/match", Map.of("filter", "active", "limit", 10));
+
+        assertThat(response.getStatusCode()).isEqualTo(200);
+
+        CapturedRequest captured = server.getLastRequest();
+        assertThat(captured).isNotNull();
+        assertThat(captured.getMethod()).isEqualTo("GET");
+        assertThat(captured.getPath()).isEqualTo("/api/stage3/match");
+        assertThat(captured.getFirstQueryParam("filter")).isEqualTo("active");
+        assertThat(captured.getFirstQueryParam("limit")).isEqualTo("10");
+        assertThat(captured.getFirstHeader("Host")).contains(String.valueOf(server.getPort()));
+    }
+
+    @Test(description = "Verify blocked final destination throws exception and performs no network dispatch")
+    @Story("Destination Validation")
+    @Severity(SeverityLevel.BLOCKER)
+    @Description("Verifies that when final destination validation fails, no network dispatch is executed.")
+    public void testBlockedFinalDestinationThrowsWithoutNetworkDispatch() {
+        server.clearCapturedRequests();
+
+        assertThatThrownBy(() -> apiClient.get("https://unapproved-blocked-host.com/api/test"))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("is not permitted by allowlist");
+
+        assertThatThrownBy(() -> apiClient.get("ftp://127.0.0.1:21/api/test"))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("must use http or https scheme");
+
+        RequestSpecification maliciousBasePathSpec = new RequestSpecBuilder()
+                .setBasePath("//evil.com")
+                .build();
+        assertThatThrownBy(() -> apiClient.get("/api/stage3/test", maliciousBasePathSpec))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("evil.com");
+
+        assertThat(server.getCapturedRequests()).isEmpty();
+    }
+
+    @Test(description = "Verify custom specification cannot override protected baseUri")
+    @Story("Custom Specification Isolation")
+    @Severity(SeverityLevel.BLOCKER)
+    @Description("Verifies that attempting to set baseUri in a custom RequestSpecification is overridden by the framework's locked base URI.")
+    public void testCustomSpecCannotOverrideBaseUri() {
+        server.registerJsonResponse("/api/stage3/baseuri-protection", 200, "{\"protected\":true}");
+        RequestSpecification customSpec = new RequestSpecBuilder()
+                .setBaseUri("https://evil.com")
+                .addHeader("X-Legit-Header", "legit-val")
+                .build();
+
+        Response response = apiClient.get("/api/stage3/baseuri-protection", customSpec);
+
+        assertThat(response.getStatusCode()).isEqualTo(200);
+        assertThat(response.jsonPath().getBoolean("protected")).isTrue();
+        CapturedRequest captured = server.getLastRequest();
+        assertThat(captured).isNotNull();
+        assertThat(captured.getPath()).isEqualTo("/api/stage3/baseuri-protection");
+        assertThat(captured.getFirstHeader("X-Legit-Header")).isEqualTo("legit-val");
+    }
+
+    @Test(description = "Verify custom specification cannot override protected destination port")
+    @Story("Custom Specification Isolation")
+    @Severity(SeverityLevel.CRITICAL)
+    @Description("Verifies that custom specifications setting an arbitrary port cannot divert traffic away from the configured port.")
+    public void testCustomSpecCannotOverridePort() {
+        server.registerJsonResponse("/api/stage3/port-protection", 200, "{\"portProtected\":true}");
+        RequestSpecification customSpec = new RequestSpecBuilder()
+                .setPort(65432)
+                .build();
+
+        Response response = apiClient.get("/api/stage3/port-protection", customSpec);
+
+        assertThat(response.getStatusCode()).isEqualTo(200);
+        assertThat(response.jsonPath().getBoolean("portProtected")).isTrue();
+        assertThat(server.getLastRequest().getPath()).isEqualTo("/api/stage3/port-protection");
+    }
+
+    @Test(description = "Verify custom specification injecting malicious basePath is rejected without network dispatch")
+    @Story("Custom Specification Isolation")
+    @Severity(SeverityLevel.BLOCKER)
+    @Description("Verifies that a custom specification attempting protocol-relative or scheme injection via basePath is rejected before dispatch.")
+    public void testCustomSpecInjectingMaliciousBasePathRejectedWithoutDispatch() {
+        server.clearCapturedRequests();
+        RequestSpecification customSpec = new RequestSpecBuilder()
+                .setBasePath("//evil.com")
+                .build();
+
+        assertThatThrownBy(() -> apiClient.get("/api/stage3/test", customSpec))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("evil.com");
+
+        assertThat(server.getCapturedRequests()).isEmpty();
+    }
+
+    @Test(description = "Verify automatic redirects are disabled and do not silently follow to unapproved external hosts")
+    @Story("Redirect Security")
+    @Severity(SeverityLevel.BLOCKER)
+    @Description("Verifies that a 302 response with an external Location header is returned without following the redirect.")
+    public void testAutomaticRedirectsAreDisabledAndDoNotSilentlyBypassAllowlist() {
+        server.registerHandler("/api/stage3/redirect-external", exchange -> {
+            exchange.getResponseHeaders().set("Location", "https://evil.com/leak-data");
+            exchange.sendResponseHeaders(302, -1);
+            exchange.close();
+        });
+
+        Response response = apiClient.get("/api/stage3/redirect-external");
+
+        assertThat(response.getStatusCode()).isEqualTo(302);
+        assertThat(response.getHeader("Location")).isEqualTo("https://evil.com/leak-data");
+    }
+
+    @Test(description = "Verify custom specification cannot enable automatic redirect following")
+    @Story("Redirect Security")
+    @Severity(SeverityLevel.BLOCKER)
+    @Description("Verifies that custom specifications passing followRedirects(true) have redirect restrictions re-enforced at execution layer.")
+    public void testCustomSpecCannotEnableAutomaticRedirects() {
+        server.registerHandler("/api/stage3/redirect-override", exchange -> {
+            exchange.getResponseHeaders().set("Location", "https://evil.com/override-leak");
+            exchange.sendResponseHeaders(302, -1);
+            exchange.close();
+        });
+
+        RequestSpecification customSpec = new RequestSpecBuilder()
+                .setConfig(RestAssuredConfig.config().redirect(RedirectConfig.redirectConfig().followRedirects(true)))
+                .build();
+
+        Response response = apiClient.get("/api/stage3/redirect-override", customSpec);
+
+        assertThat(response.getStatusCode()).isEqualTo(302);
+        assertThat(response.getHeader("Location")).isEqualTo("https://evil.com/override-leak");
+    }
+
+    @Test(description = "Verify connection and read timeouts are explicitly configured on RequestSpecification")
+    @Story("Timeout Configuration")
+    @Severity(SeverityLevel.CRITICAL)
+    @Description("Verifies that default RequestSpecification has explicit connection, socket, and connection-manager timeouts configured.")
+    public void testTimeoutsExplicitlyConfiguredOnSpecification() {
+        RequestSpecification spec = RequestSpecFactory.getDefaultRequestSpec();
+        FilterableRequestSpecification filterable = (FilterableRequestSpecification) spec;
+
+        RestAssuredConfig config = filterable.getConfig();
+        assertThat(config).isNotNull();
+        assertThat(config.getRedirectConfig().followsRedirects()).isFalse();
+        assertThat(config.getHttpClientConfig()).isNotNull();
+
+        int expectedTimeoutMillis = ConfigManager.getInstance().getHttpTimeoutSeconds() * 1000;
+        Map<String, ?> params = config.getHttpClientConfig().params();
+        assertThat(params.get("http.connection.timeout")).isEqualTo(expectedTimeoutMillis);
+        assertThat(params.get("http.socket.timeout")).isEqualTo(expectedTimeoutMillis);
+        assertThat(params.get("http.connection-manager.timeout")).isEqualTo((long) expectedTimeoutMillis);
+    }
+
+    @Test(description = "Verify custom specification cannot remove or disable configured socket timeout")
+    @Story("Timeout Configuration")
+    @Severity(SeverityLevel.CRITICAL)
+    @Description("Verifies that a custom specification attempting to set zero/infinite socket timeout has configured timeouts re-enforced.")
+    public void testCustomSpecCannotRemoveConfiguredTimeouts() {
+        server.registerJsonResponse("/api/stage3/timeout-override", 200, "{\"delayed\":true}", Duration.ofMillis(2500));
+        System.setProperty("http.timeout.seconds", "1");
+        ConfigManager.reset();
+
+        RequestSpecification customSpec = new RequestSpecBuilder()
+                .setConfig(RestAssuredConfig.config().httpClient(HttpClientConfig.httpClientConfig()
+                        .setParam("http.socket.timeout", 0)))
+                .build();
+
+        assertThatThrownBy(() -> apiClient.get("/api/stage3/timeout-override", customSpec))
+                .satisfies(throwable -> {
+                    boolean isTimeout = throwable instanceof SocketTimeoutException
+                            || (throwable.getCause() instanceof SocketTimeoutException);
+                    assertThat(isTimeout)
+                            .as("Expected SocketTimeoutException due to enforced 1-second timeout, got %s", throwable.getClass().getName())
+                            .isTrue();
+                });
     }
 }

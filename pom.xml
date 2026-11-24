@@ -28,6 +28,7 @@
         <maven-compiler-plugin.version>3.13.0</maven-compiler-plugin.version>
         <maven-surefire-plugin.version>3.5.2</maven-surefire-plugin.version>
         <allure-maven.version>2.15.2</allure-maven.version>
+        <dependency-check.version>12.1.0</dependency-check.version>
     </properties>
 
     <dependencies>
@@ -196,6 +197,29 @@
                     </execution>
                 </executions>
             </plugin>
+
+            <!-- OWASP Dependency-Check Vulnerability Scanner -->
+            <plugin>
+                <groupId>org.owasp</groupId>
+                <artifactId>dependency-check-maven</artifactId>
+                <version>${dependency-check.version}</version>
+                <configuration>
+                    <failBuildOnCVSS>7.0</failBuildOnCVSS>
+                    <formats>
+                        <format>HTML</format>
+                        <format>JSON</format>
+                    </formats>
+                    <outputDirectory>${project.build.directory}/dependency-check</outputDirectory>
+                    <suppressionFiles>
+                        <suppressionFile>dependency-check-suppressions.xml</suppressionFile>
+                    </suppressionFiles>
+                    <assemblyAnalyzerEnabled>false</assemblyAnalyzerEnabled>
+                    <ossindexAnalyzerEnabled>false</ossindexAnalyzerEnabled>
+                    <retireJsAnalyzerEnabled>false</retireJsAnalyzerEnabled>
+                    <skipTestScope>false</skipTestScope>
+                    <nvdApiKeyEnvironmentVariable>NVD_API_KEY</nvdApiKeyEnvironmentVariable>
+                </configuration>
+            </plugin>
         </plugins>
     </build>
 
@@ -244,6 +268,26 @@
                                 <allure.results.directory>${project.build.directory}/allure-results</allure.results.directory>
                             </systemPropertyVariables>
                         </configuration>
+                    </plugin>
+                </plugins>
+            </build>
+        </profile>
+        <profile>
+            <id>security-scan</id>
+            <build>
+                <plugins>
+                    <plugin>
+                        <groupId>org.owasp</groupId>
+                        <artifactId>dependency-check-maven</artifactId>
+                        <executions>
+                            <execution>
+                                <id>scan-dependencies</id>
+                                <phase>verify</phase>
+                                <goals>
+                                    <goal>check</goal>
+                                </goals>
+                            </execution>
+                        </executions>
                     </plugin>
                 </plugins>
             </build>

@@ -7,9 +7,23 @@ import io.qameta.allure.Feature;
 import io.qameta.allure.Severity;
 import io.qameta.allure.SeverityLevel;
 import io.qameta.allure.Story;
+import com.sksharma.api.tests.support.LocalHttpTestServer;
+import io.restassured.RestAssured;
 import io.restassured.builder.RequestSpecBuilder;
+import io.restassured.response.Response;
 import io.restassured.specification.FilterableRequestSpecification;
 import org.testng.annotations.Test;
+
+import java.io.BufferedReader;
+import java.io.File;
+import java.io.IOException;
+import java.io.InputStreamReader;
+import java.io.OutputStream;
+import java.net.InetAddress;
+import java.net.ServerSocket;
+import java.net.Socket;
+import java.nio.charset.StandardCharsets;
+import java.util.concurrent.CompletableFuture;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -149,6 +163,9 @@ public class SensitiveDataRedactionFilterTest {
     public void testSensitiveFieldVariations() {
         assertThat(SensitiveDataRedactionFilter.isSensitiveField("password")).isTrue();
         assertThat(SensitiveDataRedactionFilter.isSensitiveField("PASSWORD")).isTrue();
+        assertThat(SensitiveDataRedactionFilter.isSensitiveField("passwd")).isTrue();
+        assertThat(SensitiveDataRedactionFilter.isSensitiveField("PASSWD")).isTrue();
+        assertThat(SensitiveDataRedactionFilter.isSensitiveField("pass_wd")).isTrue();
         assertThat(SensitiveDataRedactionFilter.isSensitiveField("clientSecret")).isTrue();
         assertThat(SensitiveDataRedactionFilter.isSensitiveField("client_secret")).isTrue();
         assertThat(SensitiveDataRedactionFilter.isSensitiveField("client-secret")).isTrue();
@@ -169,12 +186,28 @@ public class SensitiveDataRedactionFilterTest {
         assertThat(SensitiveDataRedactionFilter.isSensitiveField("credentials")).isTrue();
         assertThat(SensitiveDataRedactionFilter.isSensitiveField("session_id")).isTrue();
         assertThat(SensitiveDataRedactionFilter.isSensitiveField("sessionId")).isTrue();
+        assertThat(SensitiveDataRedactionFilter.isSensitiveField("jwt")).isTrue();
+        assertThat(SensitiveDataRedactionFilter.isSensitiveField("JWT")).isTrue();
+        assertThat(SensitiveDataRedactionFilter.isSensitiveField("idToken")).isTrue();
+        assertThat(SensitiveDataRedactionFilter.isSensitiveField("id_token")).isTrue();
+        assertThat(SensitiveDataRedactionFilter.isSensitiveField("id-token")).isTrue();
+        assertThat(SensitiveDataRedactionFilter.isSensitiveField("authorization")).isTrue();
+        assertThat(SensitiveDataRedactionFilter.isSensitiveField("AUTHORIZATION")).isTrue();
+        assertThat(SensitiveDataRedactionFilter.isSensitiveField("cookie")).isTrue();
+        assertThat(SensitiveDataRedactionFilter.isSensitiveField("COOKIE")).isTrue();
+        assertThat(SensitiveDataRedactionFilter.isSensitiveField("setCookie")).isTrue();
+        assertThat(SensitiveDataRedactionFilter.isSensitiveField("set_cookie")).isTrue();
+        assertThat(SensitiveDataRedactionFilter.isSensitiveField("set-cookie")).isTrue();
 
-        // Non-sensitive fields
+        // Non-sensitive harmless fields must not be redacted
         assertThat(SensitiveDataRedactionFilter.isSensitiveField("username")).isFalse();
         assertThat(SensitiveDataRedactionFilter.isSensitiveField("email")).isFalse();
         assertThat(SensitiveDataRedactionFilter.isSensitiveField("title")).isFalse();
         assertThat(SensitiveDataRedactionFilter.isSensitiveField("price")).isFalse();
+        assertThat(SensitiveDataRedactionFilter.isSensitiveField("author")).isFalse();
+        assertThat(SensitiveDataRedactionFilter.isSensitiveField("authority")).isFalse();
+        assertThat(SensitiveDataRedactionFilter.isSensitiveField("description")).isFalse();
+        assertThat(SensitiveDataRedactionFilter.isSensitiveField(null)).isFalse();
     }
 
     @Test(description = "Verify JSON payload redaction handles supported naming variants in nested objects and arrays")
@@ -543,5 +576,608 @@ public class SensitiveDataRedactionFilterTest {
                 .contains("accessToken=[REDACTED]")
                 .contains("refreshToken=[REDACTED]")
                 .contains("apiKey=[REDACTED]");
+    }
+
+    @Test(description = "Verify root-level sensitive fields and root-level string tokens are redacted")
+    @Story("Payload Redaction")
+    @Severity(SeverityLevel.BLOCKER)
+    @Description("Verifies that root-level authorization, jwt, cookie, and root textual bearer tokens are properly masked.")
+    public void testRootLevelSensitiveFieldsAndTokens() {
+        String rootObjectPayload = """
+                {
+                  "authorization": "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.token.root",
+                  "jwt": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.payload.sig",
+                  "passwd": "rootPassword123",
+                  "cookie": "session_id=abcdef123456",
+                  "idToken": "id_token_root_value"
+                }
+                """;
+
+        String redacted = SensitiveDataRedactionFilter.redactJsonPayload(rootObjectPayload);
+
+        assertThat(redacted)
+                .doesNotContain("token.root")
+                .doesNotContain("payload.sig")
+                .doesNotContain("rootPassword123")
+                .doesNotContain("abcdef123456")
+                .doesNotContain("id_token_root_value")
+                .contains("\"authorization\":\"[REDACTED]\"")
+                .contains("\"jwt\":\"[REDACTED]\"")
+                .contains("\"passwd\":\"[REDACTED]\"")
+                .contains("\"cookie\":\"[REDACTED]\"")
+                .contains("\"idToken\":\"[REDACTED]\"");
+
+        // Root level textual string containing bearer token
+        String rootTextPayload = "\"Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.root.token\"";
+        String redactedText = SensitiveDataRedactionFilter.redactJsonPayload(rootTextPayload);
+        assertThat(redactedText)
+                .doesNotContain("root.token")
+                .contains("Bearer [REDACTED]");
+    }
+
+    @Test(description = "Verify Bearer tokens inside neutral JSON string values and arrays are redacted")
+    @Story("Payload Redaction")
+    @Severity(SeverityLevel.CRITICAL)
+    @Description("Verifies that Bearer tokens embedded within arbitrary textual JSON properties or string arrays are sanitized.")
+    public void testBearerTokenInsideNeutralJsonStringValues() {
+        String payload = """
+                {
+                  "description": "Please pass Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.secret123.sig to access",
+                  "hints": [
+                    "Normal hint text",
+                    "Header should be Bearer token_in_array_456"
+                  ]
+                }
+                """;
+
+        String redacted = SensitiveDataRedactionFilter.redactJsonPayload(payload);
+
+        assertThat(redacted)
+                .doesNotContain("secret123.sig")
+                .doesNotContain("token_in_array_456")
+                .contains("Please pass Bearer [REDACTED] to access")
+                .contains("Normal hint text")
+                .contains("Header should be Bearer [REDACTED]");
+    }
+
+    @Test(description = "Verify newly added sensitive fields (passwd, jwt, idToken, cookie, setCookie) in nested structures")
+    @Story("Payload Redaction")
+    @Severity(SeverityLevel.BLOCKER)
+    @Description("Verifies that passwd, jwt, id_token, cookie, set_cookie are completely redacted across nested objects and arrays.")
+    public void testNewlyAddedSensitiveFieldVariantsInJson() {
+        String payload = """
+                {
+                  "authConfig": {
+                    "passwd": "secret_passwd_val",
+                    "jwt": "jwt_val_789",
+                    "id_token": "id_token_val_012"
+                  },
+                  "session": [
+                    { "cookie": "sid_secret_cookie_345", "set_cookie": "sid_secret_setcookie_678" }
+                  ]
+                }
+                """;
+
+        String redacted = SensitiveDataRedactionFilter.redactJsonPayload(payload);
+
+        assertThat(redacted)
+                .doesNotContain("secret_passwd_val")
+                .doesNotContain("jwt_val_789")
+                .doesNotContain("id_token_val_012")
+                .doesNotContain("sid_secret_cookie_345")
+                .doesNotContain("sid_secret_setcookie_678")
+                .contains("\"passwd\":\"[REDACTED]\"")
+                .contains("\"jwt\":\"[REDACTED]\"")
+                .contains("\"id_token\":\"[REDACTED]\"")
+                .contains("\"cookie\":\"[REDACTED]\"")
+                .contains("\"set_cookie\":\"[REDACTED]\"");
+    }
+
+    @Test(description = "Verify harmless non-sensitive fields are preserved without accidental redaction")
+    @Story("Payload Integrity")
+    @Severity(SeverityLevel.NORMAL)
+    @Description("Validates that non-sensitive fields like author, authority, username, email, title, price are completely unchanged.")
+    public void testNormalFieldsRemainUnchangedInJson() {
+        String payload = """
+                {
+                  "id": 101,
+                  "username": "john_doe",
+                  "email": "john.doe@example.com",
+                  "title": "Clean Architecture",
+                  "price": 49.99,
+                  "category": "books",
+                  "author": "Robert C. Martin",
+                  "authority": "ROLE_USER"
+                }
+                """;
+
+        String redacted = SensitiveDataRedactionFilter.redactJsonPayload(payload);
+
+        assertThat(redacted)
+                .contains("\"id\":101")
+                .contains("\"username\":\"john_doe\"")
+                .contains("\"email\":\"john.doe@example.com\"")
+                .contains("\"title\":\"Clean Architecture\"")
+                .contains("\"price\":49.99")
+                .contains("\"category\":\"books\"")
+                .contains("\"author\":\"Robert C. Martin\"")
+                .contains("\"authority\":\"ROLE_USER\"")
+                .doesNotContain("[REDACTED]");
+    }
+
+    @Test(description = "Verify empty, blank, and null payloads are safely handled")
+    @Story("Edge Cases")
+    @Severity(SeverityLevel.NORMAL)
+    @Description("Verifies that empty, blank, and null inputs return empty strings without throwing exceptions.")
+    public void testEmptyAndNullPayloadHandling() {
+        assertThat(SensitiveDataRedactionFilter.redactJsonPayload(null)).isEmpty();
+        assertThat(SensitiveDataRedactionFilter.redactJsonPayload("")).isEmpty();
+        assertThat(SensitiveDataRedactionFilter.redactJsonPayload("   ")).isEmpty();
+
+        assertThat(SensitiveDataRedactionFilter.sanitizeText(null)).isEmpty();
+        assertThat(SensitiveDataRedactionFilter.sanitizeText("")).isEmpty();
+        assertThat(SensitiveDataRedactionFilter.sanitizeText("   ")).isEmpty();
+    }
+
+    @Test(description = "Verify sanitizeText redacts newly supported sensitive fields in key-values and query parameters")
+    @Story("Text Sanitization")
+    @Severity(SeverityLevel.CRITICAL)
+    @Description("Verifies text sanitization for passwd, jwt, id-token, cookie, set-cookie, and authorization in text logs.")
+    public void testSanitizeTextWithNewSensitiveFieldNames() {
+        String text = "Diagnostics: passwd=pass999, jwt=jwtToken888, id-token=idTok777, authorization=authVal666, cookie=cook555, set-cookie=setCook444";
+        String sanitized = SensitiveDataRedactionFilter.sanitizeText(text);
+
+        assertThat(sanitized)
+                .doesNotContain("pass999")
+                .doesNotContain("jwtToken888")
+                .doesNotContain("idTok777")
+                .doesNotContain("authVal666")
+                .doesNotContain("cook555")
+                .doesNotContain("setCook444")
+                .contains("passwd=[REDACTED]")
+                .contains("jwt=[REDACTED]")
+                .contains("id-token=[REDACTED]")
+                .contains("authorization=[REDACTED]")
+                .contains("cookie=[REDACTED]")
+                .contains("set-cookie=[REDACTED]");
+    }
+
+    @Test(description = "Verify malformed truncated JSON is sanitized without leaking secrets")
+    @Story("Text Sanitization")
+    @Severity(SeverityLevel.CRITICAL)
+    @Description("Verifies that incomplete, truncated JSON with open braces containing secrets is safely sanitized.")
+    public void testSanitizeTextMalformedTruncatedJson() {
+        String truncatedJson = "{\"authorization\": \"Bearer leak_tok_999\", \"passwd\": \"leak_pass_888\", \"unclosed\": ";
+        String sanitized = SensitiveDataRedactionFilter.sanitizeText(truncatedJson);
+
+        assertThat(sanitized)
+                .doesNotContain("leak_tok_999")
+                .doesNotContain("leak_pass_888")
+                .contains("Bearer [REDACTED]")
+                .contains("\"passwd\": \"[REDACTED]\"");
+    }
+
+    @Test(description = "Verify 50 KB response with declared Content-Length is excluded from logs and remains readable downstream")
+    @Story("Body Logging Limits")
+    @Severity(SeverityLevel.CRITICAL)
+    @Description("Verifies that a 50 KB JSON response with Content-Length is excluded prior to body parsing and remains readable downstream.")
+    public void test50KbResponseWithContentLengthExcludedAndReadableDownstream() throws IOException {
+        String largePadding = "x".repeat(50_000);
+        String jsonBody = "{\"status\":\"success\",\"passwd\":\"secret_large_passwd_123\",\"padding\":\"" + largePadding + "\"}";
+
+        try (LocalHttpTestServer server = LocalHttpTestServer.createAndStart()) {
+            server.registerJsonResponse("/api/large-response-cl", 200, jsonBody);
+
+            SensitiveDataRedactionFilter filter = new SensitiveDataRedactionFilter(true);
+            Response response = RestAssured.given()
+                    .filter(filter)
+                    .get(server.getBaseUrl() + "/api/large-response-cl");
+
+            // 1. Verify downstream readability is preserved
+            assertThat(response.getStatusCode()).isEqualTo(200);
+            assertThat(response.jsonPath().getString("status")).isEqualTo("success");
+            assertThat(response.asString().length()).isGreaterThan(50_000);
+
+            // 2. Verify log output captured during actual filter execution excludes oversized body
+            String sanitizedLog = filter.getLastSanitizedResponse();
+            assertThat(sanitizedLog)
+                    .contains("Payload exceeds logging limit of 10000 bytes (Content-Length:")
+                    .doesNotContain("secret_large_passwd_123")
+                    .doesNotContain(largePadding);
+        }
+    }
+
+    @Test(description = "Verify large chunked response without Content-Length is safely excluded and remains readable")
+    @Story("Body Logging Limits")
+    @Severity(SeverityLevel.CRITICAL)
+    @Description("Verifies that a 50 KB response without Content-Length (chunked) is detected via actual byte size and excluded.")
+    public void testLargeChunkedResponseWithoutContentLengthExcludedAndReadableDownstream() throws IOException {
+        String largePadding = "y".repeat(50_000);
+        String jsonBody = "{\"status\":\"chunked_ok\",\"jwt\":\"jwt_secret_token_456\",\"padding\":\"" + largePadding + "\"}";
+        byte[] bodyBytes = jsonBody.getBytes(StandardCharsets.UTF_8);
+
+        try (LocalHttpTestServer server = LocalHttpTestServer.createAndStart()) {
+            server.registerHandler("/api/large-chunked", exchange -> {
+                exchange.getResponseHeaders().set("Content-Type", "application/json");
+                // 0 indicates chunked transfer encoding (no Content-Length header)
+                exchange.sendResponseHeaders(200, 0);
+                try (OutputStream os = exchange.getResponseBody()) {
+                    os.write(bodyBytes);
+                }
+            });
+
+            SensitiveDataRedactionFilter filter = new SensitiveDataRedactionFilter(true);
+            Response response = RestAssured.given()
+                    .filter(filter)
+                    .get(server.getBaseUrl() + "/api/large-chunked");
+
+            // 1. Downstream response readability
+            assertThat(response.getStatusCode()).isEqualTo(200);
+            assertThat(response.jsonPath().getString("status")).isEqualTo("chunked_ok");
+            assertThat(response.asString().length()).isGreaterThan(50_000);
+
+            // 2. Filter log output safely excludes oversized body based on actual byte size
+            String sanitizedLog = filter.getLastSanitizedResponse();
+            assertThat(sanitizedLog)
+                    .contains("Payload exceeds logging limit of 10000 bytes (Actual size:")
+                    .doesNotContain("jwt_secret_token_456")
+                    .doesNotContain(largePadding);
+        }
+    }
+
+    @Test(description = "Verify inaccurate small Content-Length header with 50 KB payload is safely caught by actual byte size inspection")
+    @Story("Body Logging Limits")
+    @Severity(SeverityLevel.CRITICAL)
+    @Description("Verifies using a raw HTTP server that when Content-Length declares 10 bytes but actual chunked body is 50 KB, actual byte inspection excludes the body.")
+    public void testInaccurateSmallContentLengthWithLargePayloadHandledSafely() throws Exception {
+        String largePadding = "z".repeat(50_000);
+        String jsonBody = "{\"status\":\"raw_inaccurate\",\"apiKey\":\"key_secret_raw_789\",\"padding\":\"" + largePadding + "\"}";
+        byte[] bodyBytes = jsonBody.getBytes(StandardCharsets.UTF_8);
+
+        try (ServerSocket rawServer = new ServerSocket(0, 1, InetAddress.getByName("127.0.0.1"))) {
+            int port = rawServer.getLocalPort();
+
+            CompletableFuture<Void> serverFuture = CompletableFuture.runAsync(() -> {
+                try (Socket client = rawServer.accept()) {
+                    BufferedReader reader = new BufferedReader(new InputStreamReader(client.getInputStream(), StandardCharsets.UTF_8));
+                    String line;
+                    while ((line = reader.readLine()) != null && !line.isEmpty()) {
+                        // consume request headers
+                    }
+                    OutputStream out = client.getOutputStream();
+                    String chunkHex = Integer.toHexString(bodyBytes.length);
+                    String responseHeaders = "HTTP/1.1 200 OK\r\n"
+                            + "Content-Type: application/json\r\n"
+                            + "Content-Length: 10\r\n"
+                            + "Transfer-Encoding: chunked\r\n"
+                            + "Connection: close\r\n\r\n";
+                    out.write(responseHeaders.getBytes(StandardCharsets.UTF_8));
+                    out.write((chunkHex + "\r\n").getBytes(StandardCharsets.UTF_8));
+                    out.write(bodyBytes);
+                    out.write("\r\n0\r\n\r\n".getBytes(StandardCharsets.UTF_8));
+                    out.flush();
+                } catch (IOException ignored) {
+                }
+            });
+
+            SensitiveDataRedactionFilter filter = new SensitiveDataRedactionFilter(true);
+            Response response = RestAssured.given()
+                    .filter(filter)
+                    .get("http://127.0.0.1:" + port + "/api/raw-inaccurate");
+
+            serverFuture.join();
+
+            // 1. Verify inaccurate declared Content-Length header was indeed present as 10
+            assertThat(response.getHeader("Content-Length")).isEqualTo("10");
+
+            // 2. Verify actual payload received by HTTP client is over 50 KB and readable
+            assertThat(response.getStatusCode()).isEqualTo(200);
+            assertThat(response.asByteArray().length).isGreaterThan(50_000);
+            assertThat(response.jsonPath().getString("status")).isEqualTo("raw_inaccurate");
+
+            // 3. Verify actual byte inspection caught the discrepancy and safely excluded the body
+            String sanitizedLog = filter.getLastSanitizedResponse();
+            assertThat(sanitizedLog)
+                    .contains("Payload exceeds logging limit of 10000 bytes (Actual size:")
+                    .doesNotContain("key_secret_raw_789")
+                    .doesNotContain(largePadding);
+        }
+    }
+
+    @Test(description = "Verify large request body exceeding limit is excluded from logs without leaking secrets")
+    @Story("Body Logging Limits")
+    @Severity(SeverityLevel.CRITICAL)
+    @Description("Verifies that a request body exceeding 10,000 characters is excluded from log output prior to JSON processing.")
+    public void testLargeRequestBodyExceedingLimitExcludedFromLogs() throws IOException {
+        String largePadding = "a".repeat(30_000);
+        String requestJson = "{\"username\":\"admin\",\"password\":\"req_secret_pass_321\",\"data\":\"" + largePadding + "\"}";
+
+        try (LocalHttpTestServer server = LocalHttpTestServer.createAndStart()) {
+            SensitiveDataRedactionFilter filter = new SensitiveDataRedactionFilter(true);
+            RestAssured.given()
+                    .filter(filter)
+                    .contentType("application/json")
+                    .body(requestJson)
+                    .post(server.getBaseUrl() + "/api/large-req");
+
+            String sanitizedRequestLog = filter.getLastSanitizedRequest();
+            assertThat(sanitizedRequestLog)
+                    .contains("Request body exceeds logging limit of 10000 characters")
+                    .contains("Body excluded from logs to prevent log flooding.")
+                    .doesNotContain("req_secret_pass_321")
+                    .doesNotContain(largePadding);
+        }
+    }
+
+    @Test(description = "Verify response body truncation enforces exact maximum length including marker without leaking secrets")
+    @Story("Body Logging Limits")
+    @Severity(SeverityLevel.CRITICAL)
+    @Description("Verifies that response body truncation strictly bounds the complete logged body to MAX_LOG_BODY_LENGTH characters including the marker, and ensures prior redaction prevents secret leakage.")
+    public void testActualBodyTruncationEnforcesExactMaxLimitWithoutLeakingSecrets() throws IOException {
+        // Raw byte size is within 10,000 bytes (< 10,000), but redaction expansion pushes it over 10,000 characters
+        StringBuilder sb = new StringBuilder("{\"status\":\"ok\",\"passwd\":\"secret_pass_inside_expansion\",\"items\":[");
+        for (int i = 0; i < 20; i++) {
+            if (i > 0) {
+                sb.append(",");
+            }
+            sb.append("{\"token\":\"x\"}");
+        }
+        sb.append("],\"padding\":\"").append("d".repeat(9_500)).append("\"}");
+        String expansionJson = sb.toString();
+        byte[] expansionBytes = expansionJson.getBytes(StandardCharsets.UTF_8);
+
+        assertThat(expansionBytes.length)
+                .as("Raw byte size must be within 10,000 bytes so byte exclusion is not triggered")
+                .isLessThanOrEqualTo(SensitiveDataRedactionFilter.MAX_LOG_BODY_LENGTH);
+
+        try (LocalHttpTestServer server = LocalHttpTestServer.createAndStart()) {
+            server.registerJsonResponse("/api/truncation-path", 200, expansionJson);
+
+            SensitiveDataRedactionFilter filter = new SensitiveDataRedactionFilter(true);
+            Response response = RestAssured.given()
+                    .filter(filter)
+                    .get(server.getBaseUrl() + "/api/truncation-path");
+
+            assertThat(response.getStatusCode()).isEqualTo(200);
+
+            String sanitizedLog = filter.getLastSanitizedResponse();
+            assertThat(sanitizedLog)
+                    .contains(SensitiveDataRedactionFilter.TRUNCATION_MARKER)
+                    .doesNotContain("secret_pass_inside_expansion");
+
+            // Extract the body portion after '--- Body ---\n'
+            int bodyMarkerIdx = sanitizedLog.indexOf("--- Body ---\n");
+            assertThat(bodyMarkerIdx).isGreaterThanOrEqualTo(0);
+            String bodyOutput = sanitizedLog.substring(bodyMarkerIdx + "--- Body ---\n".length()).trim();
+
+            assertThat(bodyOutput.length())
+                    .as("The complete logged body output including the marker must be exactly MAX_LOG_BODY_LENGTH")
+                    .isEqualTo(SensitiveDataRedactionFilter.MAX_LOG_BODY_LENGTH);
+            assertThat(bodyOutput)
+                    .endsWith(SensitiveDataRedactionFilter.TRUNCATION_MARKER);
+        }
+    }
+
+    @Test(description = "Verify initially in-limit request body expanding past limit after redaction is truncated without leaking secrets")
+    @Story("Body Logging Limits")
+    @Severity(SeverityLevel.CRITICAL)
+    @Description("Verifies that a request body whose original length is under 10,000 characters but expands past 10,000 characters upon redaction is strictly truncated with marker and leaks no secrets.")
+    public void testInLimitRequestBodyExpandingPastLimitAfterRedactionTruncated() throws IOException {
+        // Construct request payload of ~9,850 chars (< 10,000 chars) with 25 sensitive token items
+        // Each {"token":"x"} (11 chars) expands to {"token":"[REDACTED]"} (20 chars, +9 chars each)
+        // 9,850 + (25 * 9) = 10,075 characters (> 10,000 characters)
+        StringBuilder sb = new StringBuilder("{\"password\":\"req_secret_expand_999\",\"items\":[");
+        for (int i = 0; i < 25; i++) {
+            if (i > 0) {
+                sb.append(",");
+            }
+            sb.append("{\"token\":\"x\"}");
+        }
+        sb.append("],\"padding\":\"").append("e".repeat(9_500)).append("\"}");
+        String requestJson = sb.toString();
+
+        assertThat(requestJson.length())
+                .as("Initial request body must be under MAX_LOG_BODY_LENGTH characters")
+                .isLessThanOrEqualTo(SensitiveDataRedactionFilter.MAX_LOG_BODY_LENGTH);
+
+        try (LocalHttpTestServer server = LocalHttpTestServer.createAndStart()) {
+            SensitiveDataRedactionFilter filter = new SensitiveDataRedactionFilter(true);
+            RestAssured.given()
+                    .filter(filter)
+                    .contentType("application/json")
+                    .body(requestJson)
+                    .post(server.getBaseUrl() + "/api/req-expansion");
+
+            String sanitizedRequestLog = filter.getLastSanitizedRequest();
+            assertThat(sanitizedRequestLog)
+                    .contains(SensitiveDataRedactionFilter.TRUNCATION_MARKER)
+                    .doesNotContain("req_secret_expand_999");
+
+            // Extract the body portion after '--- Body ---\n'
+            int bodyMarkerIdx = sanitizedRequestLog.indexOf("--- Body ---\n");
+            assertThat(bodyMarkerIdx).isGreaterThanOrEqualTo(0);
+            String bodyOutput = sanitizedRequestLog.substring(bodyMarkerIdx + "--- Body ---\n".length()).trim();
+
+            assertThat(bodyOutput.length())
+                    .as("The complete logged request body output including marker must be exactly MAX_LOG_BODY_LENGTH")
+                    .isEqualTo(SensitiveDataRedactionFilter.MAX_LOG_BODY_LENGTH);
+            assertThat(bodyOutput)
+                    .endsWith(SensitiveDataRedactionFilter.TRUNCATION_MARKER);
+        }
+    }
+
+    @Test(description = "Verify large non-JSON response is excluded without decoding to String and remains readable downstream")
+    @Story("Body Logging Limits")
+    @Severity(SeverityLevel.CRITICAL)
+    @Description("Verifies that a 50 KB text/html response is excluded from logs without decoding or converting to String, and remains readable downstream.")
+    public void testLargeNonJsonResponseExcludedWithoutStringDecodingAndReadableDownstream() throws IOException {
+        String htmlPadding = "<!-- comment " + "h".repeat(50_000) + " -->";
+        String htmlBody = "<!DOCTYPE html><html><head><title>Large HTML Page</title></head><body>"
+                + htmlPadding + "<h1>Maintenance</h1></body></html>";
+        byte[] htmlBytes = htmlBody.getBytes(StandardCharsets.UTF_8);
+
+        try (LocalHttpTestServer server = LocalHttpTestServer.createAndStart()) {
+            server.registerHandler("/api/large-html", exchange -> {
+                exchange.getResponseHeaders().set("Content-Type", "text/html; charset=UTF-8");
+                exchange.sendResponseHeaders(200, htmlBytes.length);
+                try (OutputStream os = exchange.getResponseBody()) {
+                    os.write(htmlBytes);
+                }
+            });
+
+            SensitiveDataRedactionFilter filter = new SensitiveDataRedactionFilter(true);
+            Response response = RestAssured.given()
+                    .filter(filter)
+                    .get(server.getBaseUrl() + "/api/large-html");
+
+            // 1. Verify downstream readability is preserved
+            assertThat(response.getStatusCode()).isEqualTo(200);
+            assertThat(response.asByteArray().length).isGreaterThan(50_000);
+            assertThat(response.asString()).contains("<title>Large HTML Page</title>");
+
+            // 2. Verify filter log safely excludes non-JSON body without leaking HTML contents
+            String sanitizedLog = filter.getLastSanitizedResponse();
+            assertThat(sanitizedLog)
+                    .contains("--- Body ---\n[Non-JSON or Binary Content Excluded]")
+                    .doesNotContain("<title>Large HTML Page</title>")
+                    .doesNotContain(htmlPadding);
+        }
+    }
+
+    @Test(description = "Verify inaccurate zero Content-Length on non-JSON response falls back to actual byte length inspection")
+    @Story("Body Logging Limits")
+    @Severity(SeverityLevel.CRITICAL)
+    @Description("Verifies using a raw HTTP server that when Content-Length is declared as 0 on a non-JSON chunked response, the filter falls back to cached byte length without decoding to String.")
+    public void testInaccurateZeroContentLengthNonJsonResponseHandledSafely() throws Exception {
+        byte[] nonJsonPayload = "Maintenance status: system upgrading\nDetailed diagnostics binary blob".getBytes(StandardCharsets.UTF_8);
+
+        try (ServerSocket rawServer = new ServerSocket(0, 1, InetAddress.getByName("127.0.0.1"))) {
+            int port = rawServer.getLocalPort();
+
+            CompletableFuture<Void> serverFuture = CompletableFuture.runAsync(() -> {
+                try (Socket client = rawServer.accept()) {
+                    BufferedReader reader = new BufferedReader(new InputStreamReader(client.getInputStream(), StandardCharsets.UTF_8));
+                    String line;
+                    while ((line = reader.readLine()) != null && !line.isEmpty()) {
+                        // consume request headers
+                    }
+                    OutputStream out = client.getOutputStream();
+                    String chunkHex = Integer.toHexString(nonJsonPayload.length);
+                    // Declared Content-Length: 0 alongside Transfer-Encoding: chunked with actual payload
+                    String responseHeaders = "HTTP/1.1 200 OK\r\n"
+                            + "Content-Type: text/plain\r\n"
+                            + "Content-Length: 0\r\n"
+                            + "Transfer-Encoding: chunked\r\n"
+                            + "Connection: close\r\n\r\n";
+                    out.write(responseHeaders.getBytes(StandardCharsets.UTF_8));
+                    out.write((chunkHex + "\r\n").getBytes(StandardCharsets.UTF_8));
+                    out.write(nonJsonPayload);
+                    out.write("\r\n0\r\n\r\n".getBytes(StandardCharsets.UTF_8));
+                    out.flush();
+                } catch (IOException ignored) {
+                }
+            });
+
+            SensitiveDataRedactionFilter filter = new SensitiveDataRedactionFilter(true);
+            Response response = RestAssured.given()
+                    .filter(filter)
+                    .get("http://127.0.0.1:" + port + "/api/zero-cl-non-json");
+
+            serverFuture.join();
+
+            // 1. Verify declared Content-Length was 0
+            assertThat(response.getHeader("Content-Length")).isEqualTo("0");
+
+            // 2. Verify actual payload was received by HTTP client and is readable downstream
+            assertThat(response.getStatusCode()).isEqualTo(200);
+            assertThat(response.asByteArray().length).isEqualTo(nonJsonPayload.length);
+            assertThat(response.asString()).contains("Maintenance status: system upgrading");
+
+            // 3. Verify filter fallback caught the non-empty body and excluded it without decoding
+            String sanitizedLog = filter.getLastSanitizedResponse();
+            assertThat(sanitizedLog)
+                    .contains("--- Body ---\n[Non-JSON or Binary Content Excluded]")
+                    .doesNotContain("Detailed diagnostics binary blob");
+        }
+    }
+
+    @Test(description = "Verify File request body exceeding limit is excluded before reading file into memory")
+    @Story("Body Logging Limits")
+    @Severity(SeverityLevel.CRITICAL)
+    @Description("Verifies that a File request body exceeding 10,000 bytes is guarded using file.length() without reading into memory.")
+    public void testLargeFileRequestBodyExcludedBeforeReadingFile() throws IOException {
+        File tempFile = File.createTempFile("large-request-", ".json");
+        tempFile.deleteOnExit();
+
+        String fileContent = "{\"apiKey\":\"file_secret_key_888\",\"data\":\"" + "f".repeat(20_000) + "\"}";
+        java.nio.file.Files.writeString(tempFile.toPath(), fileContent, StandardCharsets.UTF_8);
+
+        try (LocalHttpTestServer server = LocalHttpTestServer.createAndStart()) {
+            SensitiveDataRedactionFilter filter = new SensitiveDataRedactionFilter(true);
+            RestAssured.given()
+                    .filter(filter)
+                    .contentType("application/json")
+                    .body(tempFile)
+                    .post(server.getBaseUrl() + "/api/test-file");
+
+            String sanitizedRequestLog = filter.getLastSanitizedRequest();
+            assertThat(sanitizedRequestLog)
+                    .contains("Request body exceeds logging limit of 10000 bytes (File size:")
+                    .contains("Body excluded from logs to prevent log flooding.")
+                    .doesNotContain("file_secret_key_888")
+                    .doesNotContain("f".repeat(100));
+        }
+    }
+
+    @Test(description = "Verify byte[] request body exceeding limit is excluded before byte-to-string conversion")
+    @Story("Body Logging Limits")
+    @Severity(SeverityLevel.CRITICAL)
+    @Description("Verifies that a byte[] request body exceeding 10,000 bytes is excluded via byte array length guard.")
+    public void testLargeByteArrayRequestBodyExcludedBeforeStringConversion() throws IOException {
+        String rawPayload = "{\"token\":\"byte_secret_token_777\",\"data\":\"" + "b".repeat(25_000) + "\"}";
+        byte[] payloadBytes = rawPayload.getBytes(StandardCharsets.UTF_8);
+
+        try (LocalHttpTestServer server = LocalHttpTestServer.createAndStart()) {
+            SensitiveDataRedactionFilter filter = new SensitiveDataRedactionFilter(true);
+            RestAssured.given()
+                    .filter(filter)
+                    .contentType("application/json")
+                    .body(payloadBytes)
+                    .post(server.getBaseUrl() + "/api/test-bytes");
+
+            String sanitizedRequestLog = filter.getLastSanitizedRequest();
+            assertThat(sanitizedRequestLog)
+                    .contains("Request body exceeds logging limit of 10000 bytes (Actual size:")
+                    .contains("Body excluded from logs to prevent log flooding.")
+                    .doesNotContain("byte_secret_token_777")
+                    .doesNotContain("b".repeat(100));
+        }
+    }
+
+    @Test(description = "Verify arbitrary object request body exceeding limit is safely excluded after conversion")
+    @Story("Body Logging Limits")
+    @Severity(SeverityLevel.CRITICAL)
+    @Description("Verifies that an arbitrary POJO/object whose string representation exceeds 10,000 characters is excluded without leaking secrets.")
+    public void testArbitraryObjectRequestBodySizeCheckedAfterConversion() throws IOException {
+        // Supported POJO / Map payload whose serialized representation exceeds 10,000 characters
+        java.util.Map<String, Object> payloadMap = new java.util.HashMap<>();
+        payloadMap.put("password", "pojo_secret_pass_666");
+        payloadMap.put("data", "p".repeat(15_000));
+
+        try (LocalHttpTestServer server = LocalHttpTestServer.createAndStart()) {
+            SensitiveDataRedactionFilter filter = new SensitiveDataRedactionFilter(true);
+            RestAssured.given()
+                    .filter(filter)
+                    .contentType("application/json")
+                    .body(payloadMap)
+                    .post(server.getBaseUrl() + "/api/test-map");
+
+            String sanitizedRequestLog = filter.getLastSanitizedRequest();
+            assertThat(sanitizedRequestLog)
+                    .contains("Request body exceeds logging limit of 10000 characters (Actual length:")
+                    .contains("Body excluded from logs to prevent log flooding.")
+                    .doesNotContain("pojo_secret_pass_666")
+                    .doesNotContain("p".repeat(100));
+        }
     }
 }

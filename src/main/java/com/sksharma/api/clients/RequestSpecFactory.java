@@ -25,6 +25,8 @@ public final class RequestSpecFactory {
      */
     public static RequestSpecification getDefaultRequestSpec() {
         ConfigManager config = ConfigManager.getInstance();
+        String baseUrl = config.getBaseUrl();
+        config.validateRequestUrl(baseUrl);
         int timeoutMillis = config.getHttpTimeoutSeconds() * 1000;
 
         RestAssuredConfig restAssuredConfig = RestAssuredConfig.config()
@@ -35,7 +37,7 @@ public final class RequestSpecFactory {
                 .redirect(RedirectConfig.redirectConfig().followRedirects(false));
 
         return new RequestSpecBuilder()
-                .setBaseUri(config.getBaseUrl())
+                .setBaseUri(baseUrl)
                 .setContentType(ContentType.JSON)
                 .setAccept(ContentType.JSON)
                 .setConfig(restAssuredConfig)

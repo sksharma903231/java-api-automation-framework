@@ -1,14 +1,21 @@
 package com.sksharma.api.clients;
 
+import com.sksharma.api.config.ConfigManager;
 import io.restassured.RestAssured;
+import io.restassured.config.HttpClientConfig;
+import io.restassured.config.RedirectConfig;
+import io.restassured.config.RestAssuredConfig;
 import io.restassured.response.Response;
+import io.restassured.specification.FilterableRequestSpecification;
 import io.restassured.specification.RequestSpecification;
 
+import java.net.URI;
 import java.util.Map;
 
 /**
  * Reusable HTTP client centralizing HTTP method execution across the framework.
  * Does not contain endpoint paths or business operations.
+ * Enforces URL security, host allowlisting, redirect restrictions, and mode constraints prior to dispatch.
  */
 public class ApiClient {
 
@@ -25,10 +32,7 @@ public class ApiClient {
     }
 
     public Response get(String endpoint, Map<String, ?> queryParams, RequestSpecification customSpec) {
-        RequestSpecification req = prepareRequest(customSpec);
-        if (queryParams != null && !queryParams.isEmpty()) {
-            req.queryParams(queryParams);
-        }
+        RequestSpecification req = prepareRequest(endpoint, queryParams, customSpec);
         return req.when().get(endpoint);
     }
 
@@ -37,7 +41,7 @@ public class ApiClient {
     }
 
     public Response post(String endpoint, Object body, RequestSpecification customSpec) {
-        RequestSpecification req = prepareRequest(customSpec);
+        RequestSpecification req = prepareRequest(endpoint, null, customSpec);
         if (body != null) {
             req.body(body);
         }
@@ -49,7 +53,7 @@ public class ApiClient {
     }
 
     public Response put(String endpoint, Object body, RequestSpecification customSpec) {
-        RequestSpecification req = prepareRequest(customSpec);
+        RequestSpecification req = prepareRequest(endpoint, null, customSpec);
         if (body != null) {
             req.body(body);
         }
@@ -61,7 +65,7 @@ public class ApiClient {
     }
 
     public Response patch(String endpoint, Object body, RequestSpecification customSpec) {
-        RequestSpecification req = prepareRequest(customSpec);
+        RequestSpecification req = prepareRequest(endpoint, null, customSpec);
         if (body != null) {
             req.body(body);
         }
@@ -73,18 +77,81 @@ public class ApiClient {
     }
 
     public Response delete(String endpoint, RequestSpecification customSpec) {
-        RequestSpecification req = prepareRequest(customSpec);
+        RequestSpecification req = prepareRequest(endpoint, null, customSpec);
         return req.when().delete(endpoint);
     }
 
-    private RequestSpecification prepareRequest(RequestSpecification customSpec) {
-        RequestSpecification spec = RestAssured.given().spec(RequestSpecFactory.getDefaultRequestSpec());
+    private RequestSpecification prepareRequest(String endpoint, Map<String, ?> queryParams,
+                                                RequestSpecification customSpec) {
+        ConfigManager config = ConfigManager.getInstance();
+        String baseUrl = config.getBaseUrl();
+        URI parsedBaseUri = URI.create(baseUrl);
+        int basePort = parsedBaseUri.getPort();
+
+        // Guard against protocol-relative authority injection before specification resolution
+        if (endpoint != null && endpoint.startsWith("//")) {
+            String scheme = baseUrl.startsWith("https://") ? "https:" : "http:";
+            config.validateRequestUrl(scheme + endpoint);
+        }
+
+        if (customSpec instanceof FilterableRequestSpecification filterable) {
+            String bp = filterable.getBasePath();
+            if (bp != null && !bp.isBlank()) {
+                if (bp.startsWith("//")) {
+                    String scheme = baseUrl.startsWith("https://") ? "https:" : "http:";
+                    config.validateRequestUrl(scheme + bp + (endpoint != null ? endpoint : ""));
+                } else if (bp.contains("://")) {
+                    config.validateRequestUrl(bp + (endpoint != null ? endpoint : ""));
+                }
+            }
+        }
+
+        FilterableRequestSpecification spec = (FilterableRequestSpecification) RestAssured.given()
+                .spec(RequestSpecFactory.getDefaultRequestSpec());
         if (customSpec != null) {
             spec.spec(customSpec);
-            // Protect against RequestSpecBuilder default baseUri (http://localhost:8080) overriding configured URL
-            String configuredBaseUrl = com.sksharma.api.config.ConfigManager.getInstance().getBaseUrl();
-            spec.baseUri(configuredBaseUrl);
         }
+
+        // Lock destination baseUri and basePort to configured values, preventing customSpec overrides
+        spec.baseUri(baseUrl);
+        spec.port(basePort);
+
+        if (queryParams != null && !queryParams.isEmpty()) {
+            spec.queryParams(queryParams);
+        }
+
+        if (endpoint != null && !endpoint.isBlank()) {
+            spec.path(endpoint);
+        }
+
+        // Establish effective destination using REST Assured's exact URI resolution rules
+        String effectiveDestination = spec.getURI();
+        if (effectiveDestination == null || effectiveDestination.isBlank()) {
+            throw new IllegalStateException("Failed to establish effective destination for endpoint: " + endpoint);
+        }
+
+        // Validate the exact destination established by REST Assured
+        config.validateRequestUrl(effectiveDestination);
+
+        // Enforce destination validation filter at the final execution layer right before dispatch
+        spec.filter((requestSpec, responseSpec, ctx) -> {
+            String dispatchUri = requestSpec.getURI();
+            if (dispatchUri == null || dispatchUri.isBlank()) {
+                throw new IllegalStateException("Cannot dispatch request with empty destination URI");
+            }
+            config.validateRequestUrl(dispatchUri);
+            return ctx.next(requestSpec, responseSpec);
+        });
+
+        // Enforce redirect restrictions and timeouts at the final execution layer
+        int timeoutMillis = config.getHttpTimeoutSeconds() * 1000;
+        spec.config(RestAssuredConfig.config()
+                .redirect(RedirectConfig.redirectConfig().followRedirects(false))
+                .httpClient(HttpClientConfig.httpClientConfig()
+                        .setParam("http.connection.timeout", timeoutMillis)
+                        .setParam("http.socket.timeout", timeoutMillis)
+                        .setParam("http.connection-manager.timeout", (long) timeoutMillis)));
+
         return spec;
     }
 }
