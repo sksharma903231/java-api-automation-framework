@@ -6,6 +6,16 @@ on:
   pull_request:
     branches: [ main, master ]
   workflow_dispatch:
+    inputs:
+      test_profile:
+        description: 'Test profile to execute'
+        required: true
+        default: 'all'
+        type: choice
+        options:
+          - all
+          - offline
+          - integration
 
 permissions:
   contents: read
@@ -27,8 +37,55 @@ jobs:
           distribution: 'temurin'
           cache: 'maven'
 
-      - name: Execute Checkstyle, SpotBugs, and TestNG Test Suite
-        run: mvn clean verify --batch-mode
+      - name: Determine Test Execution Strategy
+        id: select-strategy
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          INPUT_PROFILE: ${{ inputs.test_profile }}
+        run: |
+          if [ "$EVENT_NAME" = "workflow_dispatch" ]; then
+            case "$INPUT_PROFILE" in
+              offline)
+                echo "target=offline" >> "$GITHUB_OUTPUT"
+                echo "description=Running deterministic offline test suite (59 tests, zero external network requests)" >> "$GITHUB_OUTPUT"
+                ;;
+              integration)
+                echo "target=integration" >> "$GITHUB_OUTPUT"
+                echo "description=Running live integration test suite against DummyJSON (49 tests - requires internet connectivity)" >> "$GITHUB_OUTPUT"
+                ;;
+              all)
+                echo "target=all" >> "$GITHUB_OUTPUT"
+                echo "description=Running complete test suite including offline and live integration tests (108 tests)" >> "$GITHUB_OUTPUT"
+                ;;
+              *)
+                echo "Error: Unknown test profile '$INPUT_PROFILE'" >&2
+                exit 1
+                ;;
+            esac
+          else
+            echo "target=offline" >> "$GITHUB_OUTPUT"
+            echo "description=Running default push/PR offline test suite (59 tests - zero external network requests)" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Execute Offline Tests & Quality Checks
+        if: steps.select-strategy.outputs.target == 'offline'
+        run: |
+          echo "Strategy: ${{ steps.select-strategy.outputs.description }}"
+          mvn clean verify -Poffline --batch-mode
+
+      - name: Execute Integration Tests & Quality Checks
+        if: steps.select-strategy.outputs.target == 'integration'
+        run: |
+          echo "Strategy: ${{ steps.select-strategy.outputs.description }}"
+          echo "NOTE: Active internet connectivity and DummyJSON API availability are required."
+          mvn clean verify -Pintegration --batch-mode
+
+      - name: Execute Complete Test Suite & Quality Checks
+        if: steps.select-strategy.outputs.target == 'all'
+        run: |
+          echo "Strategy: ${{ steps.select-strategy.outputs.description }}"
+          echo "NOTE: Running complete test suite (108 executions). Active internet connectivity and DummyJSON API availability are required for integration tests."
+          mvn clean verify --batch-mode
 
       - name: Generate Allure Report
         if: always()
@@ -46,10 +103,18 @@ jobs:
             target/spotbugsXml.xml
           retention-days: 14
 
-      - name: Upload Allure Report
+      - name: Upload Allure Raw Results
         uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: allure-report
+          name: allure-raw-results
+          path: target/allure-results/
+          retention-days: 14
+
+      - name: Upload Allure HTML Report
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: allure-html-report
           path: target/site/allure-maven-plugin/
           retention-days: 14
