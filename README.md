@@ -113,8 +113,8 @@ flowchart TD
     Redaction --> Listener
     Listener --> Allure
 
-    Transport_Layer -->|Offline Mode (-Poffline)| LocalServer
-    Transport_Layer -->|Integration Mode (-Pintegration)| RemoteAPI
+    Transport_Layer -->|Offline Mode: Poffline| LocalServer
+    Transport_Layer -->|Integration Mode: Pintegration| RemoteAPI
 ```
 
 ---
