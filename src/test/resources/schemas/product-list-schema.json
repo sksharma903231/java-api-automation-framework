@@ -1,0 +1,28 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "ProductListResponse",
+  "type": "object",
+  "required": [
+    "products",
+    "total",
+    "skip",
+    "limit"
+  ],
+  "properties": {
+    "products": {
+      "type": "array",
+      "items": {
+        "$ref": "product-schema.json"
+      }
+    },
+    "total": {
+      "type": "integer"
+    },
+    "skip": {
+      "type": "integer"
+    },
+    "limit": {
+      "type": "integer"
+    }
+  }
+}

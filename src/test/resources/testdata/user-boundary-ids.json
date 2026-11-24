@@ -1,0 +1,17 @@
+[
+  {
+    "id": 0,
+    "expectedStatus": 404,
+    "description": "Zero boundary ID"
+  },
+  {
+    "id": -1,
+    "expectedStatus": 404,
+    "description": "Negative integer ID"
+  },
+  {
+    "id": 999999,
+    "expectedStatus": 404,
+    "description": "High non-existent ID"
+  }
+]

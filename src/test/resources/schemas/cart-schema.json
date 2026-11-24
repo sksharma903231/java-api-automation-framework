@@ -1,0 +1,82 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Cart",
+  "type": "object",
+  "required": [
+    "id",
+    "products",
+    "total",
+    "discountedTotal",
+    "userId",
+    "totalProducts",
+    "totalQuantity"
+  ],
+  "properties": {
+    "id": {
+      "type": "integer"
+    },
+    "products": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "id",
+          "title",
+          "price",
+          "quantity",
+          "total"
+        ],
+        "properties": {
+          "id": {
+            "type": "integer"
+          },
+          "title": {
+            "type": "string"
+          },
+          "price": {
+            "type": "number"
+          },
+          "quantity": {
+            "type": "integer"
+          },
+          "total": {
+            "type": "number"
+          },
+          "discountPercentage": {
+            "type": "number"
+          },
+          "discountedTotal": {
+            "type": "number"
+          },
+          "discountedPrice": {
+            "type": "number"
+          },
+          "thumbnail": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "total": {
+      "type": "number"
+    },
+    "discountedTotal": {
+      "type": "number"
+    },
+    "userId": {
+      "type": "integer"
+    },
+    "totalProducts": {
+      "type": "integer"
+    },
+    "totalQuantity": {
+      "type": "integer"
+    },
+    "isDeleted": {
+      "type": "boolean"
+    },
+    "deletedOn": {
+      "type": "string"
+    }
+  }
+}

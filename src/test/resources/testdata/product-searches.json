@@ -1,0 +1,14 @@
+[
+  {
+    "query": "phone",
+    "expectedCategory": "smartphones"
+  },
+  {
+    "query": "laptop",
+    "expectedCategory": "laptops"
+  },
+  {
+    "query": "fragrance",
+    "expectedCategory": "fragrances"
+  }
+]
