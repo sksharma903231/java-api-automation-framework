@@ -18,11 +18,12 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 @Epic("E-Commerce API")
 @Feature("User Management")
+@Test(groups = "integration")
 public class UserServiceTest {
 
     private UserService userService;
 
-    @BeforeClass
+    @BeforeClass(alwaysRun = true)
     public void setup() {
         userService = new UserService();
     }

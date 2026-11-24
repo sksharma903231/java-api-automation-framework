@@ -3,8 +3,11 @@ package com.sksharma.api.tests.listeners;
 import io.qameta.allure.Allure;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.testng.ITestContext;
 import org.testng.ITestListener;
 import org.testng.ITestResult;
+
+import java.util.Arrays;
 
 /**
  * TestNG listener that records test execution lifecycle events, logs outcomes,
@@ -13,6 +16,29 @@ import org.testng.ITestResult;
 public class TestExecutionListener implements ITestListener {
 
     private static final Logger LOG = LoggerFactory.getLogger(TestExecutionListener.class);
+
+    @Override
+    public void onStart(ITestContext context) {
+        String[] includedGroups = context.getIncludedGroups();
+        if (includedGroups != null && Arrays.asList(includedGroups).contains("integration")) {
+            LOG.info("================================================================================");
+            LOG.info("[INTEGRATION TEST PROFILE ACTIVE]");
+            LOG.info("Executing integration test suite against DummyJSON API (base URL: {}).",
+                    com.sksharma.api.config.ConfigManager.getInstance().getBaseUrl());
+            LOG.info("Active internet connectivity and DummyJSON service availability are required.");
+            LOG.info("================================================================================");
+        } else if (includedGroups != null && Arrays.asList(includedGroups).contains("offline")) {
+            LOG.info("================================================================================");
+            LOG.info("[OFFLINE TEST PROFILE ACTIVE]");
+            LOG.info("Executing deterministic local test suite without external network dependencies.");
+            LOG.info("================================================================================");
+        } else {
+            LOG.info("================================================================================");
+            LOG.info("[FULL TEST SUITE ACTIVE]");
+            LOG.info("Executing complete test suite (both offline and external integration tests).");
+            LOG.info("================================================================================");
+        }
+    }
 
     @Override
     public void onTestStart(ITestResult result) {

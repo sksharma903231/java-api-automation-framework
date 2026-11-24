@@ -20,11 +20,12 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 @Epic("E-Commerce API")
 @Feature("Authentication")
+@Test(groups = "integration")
 public class AuthServiceTest {
 
     private AuthService authService;
 
-    @BeforeClass
+    @BeforeClass(alwaysRun = true)
     public void setup() {
         authService = new AuthService();
     }

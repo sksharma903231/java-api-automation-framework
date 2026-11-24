@@ -30,7 +30,7 @@ public class JsonSchemaValidationTest {
     private ProductService productService;
     private CartService cartService;
 
-    @BeforeClass
+    @BeforeClass(alwaysRun = true)
     public void setup() {
         authService = new AuthService();
         userService = new UserService();
@@ -38,7 +38,7 @@ public class JsonSchemaValidationTest {
         cartService = new CartService();
     }
 
-    @Test(description = "Validate authentication response conforms to login-response-schema.json")
+    @Test(groups = "integration", description = "Validate authentication response conforms to login-response-schema.json")
     @Story("Auth Contract Validation")
     @Severity(SeverityLevel.BLOCKER)
     @Description("Validates that /auth/login response strictly complies with JSON Schema definitions.")
@@ -52,7 +52,7 @@ public class JsonSchemaValidationTest {
         response.then().assertThat().body(matchesJsonSchemaInClasspath("schemas/login-response-schema.json"));
     }
 
-    @Test(description = "Validate single user response conforms to user-schema.json")
+    @Test(groups = "integration", description = "Validate single user response conforms to user-schema.json")
     @Story("User Contract Validation")
     @Severity(SeverityLevel.CRITICAL)
     @Description("Validates that /users/{id} response strictly complies with user-schema.json.")
@@ -63,7 +63,7 @@ public class JsonSchemaValidationTest {
         response.then().assertThat().body(matchesJsonSchemaInClasspath("schemas/user-schema.json"));
     }
 
-    @Test(description = "Validate user list response conforms to user-list-schema.json")
+    @Test(groups = "integration", description = "Validate user list response conforms to user-list-schema.json")
     @Story("User Contract Validation")
     @Severity(SeverityLevel.NORMAL)
     @Description("Validates that /users paginated response strictly complies with user-list-schema.json.")
@@ -74,7 +74,7 @@ public class JsonSchemaValidationTest {
         response.then().assertThat().body(matchesJsonSchemaInClasspath("schemas/user-list-schema.json"));
     }
 
-    @Test(description = "Validate single product response conforms to product-schema.json")
+    @Test(groups = "integration", description = "Validate single product response conforms to product-schema.json")
     @Story("Product Contract Validation")
     @Severity(SeverityLevel.CRITICAL)
     @Description("Validates that /products/{id} response strictly complies with product-schema.json.")
@@ -85,7 +85,7 @@ public class JsonSchemaValidationTest {
         response.then().assertThat().body(matchesJsonSchemaInClasspath("schemas/product-schema.json"));
     }
 
-    @Test(description = "Validate product list response conforms to product-list-schema.json")
+    @Test(groups = "integration", description = "Validate product list response conforms to product-list-schema.json")
     @Story("Product Contract Validation")
     @Severity(SeverityLevel.NORMAL)
     @Description("Validates that /products paginated response strictly complies with product-list-schema.json.")
@@ -96,7 +96,7 @@ public class JsonSchemaValidationTest {
         response.then().assertThat().body(matchesJsonSchemaInClasspath("schemas/product-list-schema.json"));
     }
 
-    @Test(description = "Validate product search response conforms to product-list-schema.json")
+    @Test(groups = "integration", description = "Validate product search response conforms to product-list-schema.json")
     @Story("Product Contract Validation")
     @Severity(SeverityLevel.NORMAL)
     @Description("Validates that /products/search response complies with product-list-schema.json.")
@@ -107,7 +107,7 @@ public class JsonSchemaValidationTest {
         response.then().assertThat().body(matchesJsonSchemaInClasspath("schemas/product-list-schema.json"));
     }
 
-    @Test(description = "Validate single cart response conforms to cart-schema.json")
+    @Test(groups = "integration", description = "Validate single cart response conforms to cart-schema.json")
     @Story("Cart Contract Validation")
     @Severity(SeverityLevel.CRITICAL)
     @Description("Validates that /carts/{id} response strictly complies with cart-schema.json.")
@@ -118,7 +118,7 @@ public class JsonSchemaValidationTest {
         response.then().assertThat().body(matchesJsonSchemaInClasspath("schemas/cart-schema.json"));
     }
 
-    @Test(description = "Validate cart list response conforms to cart-list-schema.json")
+    @Test(groups = "integration", description = "Validate cart list response conforms to cart-list-schema.json")
     @Story("Cart Contract Validation")
     @Severity(SeverityLevel.NORMAL)
     @Description("Validates that /carts paginated response strictly complies with cart-list-schema.json.")
@@ -129,7 +129,7 @@ public class JsonSchemaValidationTest {
         response.then().assertThat().body(matchesJsonSchemaInClasspath("schemas/cart-list-schema.json"));
     }
 
-    @Test(description = "Verify JSON schema validator detects mismatches when given a deliberately invalid payload")
+    @Test(groups = "offline", description = "Verify JSON schema validator detects mismatches when given a deliberately invalid payload")
     @Story("Negative Contract Validation")
     @Severity(SeverityLevel.BLOCKER)
     @Description("Asserts that JsonSchemaValidator detects type mismatches and missing required attributes.")

@@ -235,22 +235,27 @@ A common security flaw in automation frameworks is leaking sensitive credentials
 
 ## Test Strategy & Coverage
 
-The test suite consists of **74 distinct test methods**, producing **83 individual test executions** across multiple datasets (verified via Surefire reports).
+The test suite consists of **97 distinct test methods**, producing **106 individual test executions** across multiple datasets (verified via Surefire reports). Tests are strictly separated into **offline** and **integration** execution profiles:
+
+- **Offline Profile (`-Poffline`)**: 59 distinct test methods, 59 executions (100% deterministic local execution, zero external network requests).
+- **Integration Profile (`-Pintegration`)**: 38 distinct test methods, 47 executions (requires internet connectivity and DummyJSON availability).
+- **Complete Suite (`mvn clean verify`)**: 97 distinct test methods, 106 executions (runs all offline and integration suites).
 
 ### Test Suite Breakdown
 
-| Test Class | Domain | Test Methods | Executions | Key Behaviors Validated |
-|---|---|:---:|:---:|---|
-| [`AuthServiceTest`](src/test/java/com/sksharma/api/tests/services/AuthServiceTest.java) | Authentication | 4 | 7 | Valid demo login, token validation, data-driven invalid credentials (empty user, empty pass, invalid pass, non-existent user), token-based protected profile fetch, expired/invalid token handling |
-| [`UserServiceTest`](src/test/java/com/sksharma/api/tests/services/UserServiceTest.java) | User Management | 6 | 8 | Get all users, pagination structure, get user by ID, user search query, user creation (POST 201), user update (PUT 200), boundary ID testing (min, max, out-of-bounds) |
-| [`ProductServiceTest`](src/test/java/com/sksharma/api/tests/services/ProductServiceTest.java) | Products | 7 | 9 | Get all products, get product by ID, invalid product ID (404), category filtering, data-driven search queries (phone, laptop, watch, non-matching), product creation, full update (PUT), simulated deletion (DELETE) |
-| [`CartServiceTest`](src/test/java/com/sksharma/api/tests/services/CartServiceTest.java) | Carts & Orders | 7 | 9 | Get all carts, get cart by ID, non-existent cart 404, data-driven user carts query, add cart with items (POST 201), cart update (PUT 200), cart deletion (DELETE 200) |
-| [`JsonSchemaValidationTest`](src/test/java/com/sksharma/api/tests/schemas/JsonSchemaValidationTest.java) | Schema Validation | 9 | 9 | Draft-07 JSON Schema validation against live API responses for Auth, User, User List, Product, Product List, Product Search, Cart, Cart List |
-| [`ApiClientTest`](src/test/java/com/sksharma/api/tests/clients/ApiClientTest.java) | Core HTTP Client | 8 | 8 | GET, POST, PUT, PATCH, DELETE operations, 5-thread concurrent execution safety, runtime config override with local HTTP server destination verification, live log/Allure secret leak verification |
-| [`ConfigManagerTest`](src/test/java/com/sksharma/api/tests/config/ConfigManagerTest.java) | Configuration | 12 | 12 | Property file loading, system property precedence, fallbacks, type parsing, scheme validation (rejects ftp), relative URI rejection, userinfo rejection, query parameter rejection, fragment rejection, timeout bounds (1–300s) |
-| [`SensitiveDataRedactionFilterTest`](src/test/java/com/sksharma/api/tests/filters/SensitiveDataRedactionFilterTest.java) | Security | 20 | 20 | Query parameter omission, nested JSON AST redaction, container/object redaction, null value handling, casing variations, non-JSON shielding, Bearer token variations, encoded query strings (%26 and %3D values, literal & boundaries, nested queries, mixed encoding, empty values), exception messages with nested JSON/URL credentials, kebab-case, snake_case, and camelCase key-value and URL query parameter sanitization |
-| [`TestExecutionListenerSecurityTest`](src/test/java/com/sksharma/api/tests/listeners/TestExecutionListenerSecurityTest.java) | Listener Security | 1 | 1 | Verifies that synthetic exception secrets (passwords, tokens, query params) do not leak into application logs (asserting on newly appended bytes) and that newly generated Allure failure diagnostic attachments are created and sanitized |
-| **Total** | **9 Test Suites** | **74** | **83** | **83 / 83 PASS (100%)** |
+| Test Class | Domain | Profile | Test Methods | Executions | Key Behaviors Validated |
+|---|---|:---:|:---:|:---:|---|
+| [`AuthServiceTest`](src/test/java/com/sksharma/api/tests/services/AuthServiceTest.java) | Authentication | `integration` | 4 | 7 | Valid demo login, token validation, data-driven invalid credentials (empty user, empty pass, invalid pass, non-existent user), token-based protected profile fetch, expired/invalid token handling |
+| [`UserServiceTest`](src/test/java/com/sksharma/api/tests/services/UserServiceTest.java) | User Management | `integration` | 6 | 8 | Get all users, pagination structure, get user by ID, user search query, user creation (POST 201), user update (PUT 200), boundary ID testing (min, max, out-of-bounds) |
+| [`ProductServiceTest`](src/test/java/com/sksharma/api/tests/services/ProductServiceTest.java) | Products | `integration` | 7 | 9 | Get all products, get product by ID, invalid product ID (404), category filtering, data-driven search queries (phone, laptop, watch, non-matching), product creation, full update (PUT), simulated deletion (DELETE) |
+| [`CartServiceTest`](src/test/java/com/sksharma/api/tests/services/CartServiceTest.java) | Carts & Orders | `integration` | 7 | 9 | Get all carts, get cart by ID, non-existent cart 404, data-driven user carts query, add cart with items (POST 201), cart update (PUT 200), cart deletion (DELETE 200) |
+| [`JsonSchemaValidationTest`](src/test/java/com/sksharma/api/tests/schemas/JsonSchemaValidationTest.java) | Schema Validation | Mixed (8 `int`, 1 `off`) | 9 | 9 | Draft-07 JSON Schema validation against live API responses for Auth, User, Product, Cart; negative contract validation with deliberately invalid payload |
+| [`ApiClientTest`](src/test/java/com/sksharma/api/tests/clients/ApiClientTest.java) | Core HTTP Client | Mixed (6 `int`, 2 `off`) | 8 | 8 | GET, POST, PUT, PATCH, DELETE operations, 5-thread concurrent execution safety with request-response identity matching, runtime config override, live log/Allure secret leak verification |
+| [`ApiClientOfflineTest`](src/test/java/com/sksharma/api/tests/clients/ApiClientOfflineTest.java) | Offline HTTP Client | `offline` | 23 | 23 | Ephemeral local server testing: all HTTP methods, query params, custom headers, JSON body, Content-Type/Accept, URL construction, HTTP 200/201/204/400/401/404/500, timeouts, malformed JSON, empty bodies, HTML error pages, connection failure, 10-thread concurrency |
+| [`ConfigManagerTest`](src/test/java/com/sksharma/api/tests/config/ConfigManagerTest.java) | Configuration | `offline` | 12 | 12 | Property file loading, system property precedence, fallbacks, type parsing, scheme validation (rejects ftp), relative URI rejection, userinfo rejection, query parameter rejection, fragment rejection, timeout bounds (1–300s) |
+| [`SensitiveDataRedactionFilterTest`](src/test/java/com/sksharma/api/tests/filters/SensitiveDataRedactionFilterTest.java) | Security | `offline` | 20 | 20 | Query parameter omission, nested JSON AST redaction, container/object redaction, null value handling, casing variations, non-JSON shielding, Bearer token variations, encoded query strings (%26 and %3D values, literal & boundaries, nested queries, mixed encoding, empty values), exception messages with nested JSON/URL credentials, kebab-case, snake_case, and camelCase key-value and URL query parameter sanitization |
+| [`TestExecutionListenerSecurityTest`](src/test/java/com/sksharma/api/tests/listeners/TestExecutionListenerSecurityTest.java) | Listener Security | `offline` | 1 | 1 | Verifies that synthetic exception secrets (passwords, tokens, query params) do not leak into application logs (asserting on newly appended bytes) and that newly generated Allure failure diagnostic attachments are created and sanitized |
+| **Total** | **10 Test Suites** | — | **97** | **106** | **106 / 106 PASS (100%)** |
 
 ### JSON Schema Validation
 Schema definitions reside under `src/test/resources/schemas/`:
@@ -327,8 +332,20 @@ cd api-automation-framework
 
 ### Run Full Test Suite & Quality Checks
 ```bash
-# Run Checkstyle, SpotBugs, and full TestNG test suite
+# Run Checkstyle, SpotBugs, and complete TestNG test suite (106 executions)
 mvn clean verify
+```
+
+### Run Offline Test Suite (Zero External Dependencies)
+```bash
+# Run deterministic local client, security, config, and schema tests (59 executions)
+mvn clean verify -Poffline
+```
+
+### Run Integration Test Suite (DummyJSON API)
+```bash
+# Run live service and contract integration tests (47 executions)
+mvn clean verify -Pintegration
 ```
 
 ### Run Static Analysis Independently

@@ -16,10 +16,11 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 @Epic("Core Framework")
 @Feature("Configuration Management")
+@Test(groups = "offline")
 public class ConfigManagerTest {
 
-    @BeforeMethod
-    @AfterMethod
+    @BeforeMethod(alwaysRun = true)
+    @AfterMethod(alwaysRun = true)
     public void cleanupProperties() {
         System.clearProperty("base.url");
         System.clearProperty("http.timeout.seconds");

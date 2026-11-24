@@ -14,6 +14,8 @@ import io.qameta.allure.SeverityLevel;
 import io.qameta.allure.Story;
 import io.restassured.response.Response;
 import io.restassured.specification.RequestSpecification;
+import com.sksharma.api.tests.support.LocalHttpTestServer;
+import com.sksharma.api.tests.support.LocalHttpTestServer.CapturedRequest;
 import org.testng.annotations.AfterMethod;
 import org.testng.annotations.BeforeClass;
 import org.testng.annotations.BeforeMethod;
@@ -46,13 +48,13 @@ public class ApiClientTest {
     private static final String IDENTIFIABLE_BEARER_SECRET = "secret_live_bearer_token_7777_test";
     private static final String IDENTIFIABLE_PASSWORD_SECRET = "secret_live_password_8888_test";
 
-    @BeforeClass
+    @BeforeClass(alwaysRun = true)
     public void setup() {
         apiClient = new ApiClient();
     }
 
-    @BeforeMethod
-    @AfterMethod
+    @BeforeMethod(alwaysRun = true)
+    @AfterMethod(alwaysRun = true)
     public void cleanupProperties() {
         System.clearProperty("base.url");
         System.clearProperty("http.timeout.seconds");
@@ -60,7 +62,7 @@ public class ApiClientTest {
         ConfigManager.reset();
     }
 
-    @Test(description = "Verify GET execution using ApiClient against DummyJSON diagnostics endpoint")
+    @Test(groups = "integration", description = "Verify GET execution using ApiClient against DummyJSON diagnostics endpoint")
     @Story("HTTP Execution")
     @Severity(SeverityLevel.BLOCKER)
     @Description("Executes an HTTP GET request against DummyJSON diagnostics endpoint and verifies response code and JSON body.")
@@ -75,7 +77,7 @@ public class ApiClientTest {
         response.then().spec(ResponseSpecFactory.getSuccessResponseSpec());
     }
 
-    @Test(description = "Verify POST execution using ApiClient creating a resource")
+    @Test(groups = "integration", description = "Verify POST execution using ApiClient creating a resource")
     @Story("HTTP Execution")
     @Severity(SeverityLevel.CRITICAL)
     @Description("Executes an HTTP POST request to create a simulated resource and validates 201 status code.")
@@ -95,7 +97,7 @@ public class ApiClientTest {
         response.then().spec(ResponseSpecFactory.getJsonResponseSpec());
     }
 
-    @Test(description = "Verify PUT execution using ApiClient updating an entire resource")
+    @Test(groups = "integration", description = "Verify PUT execution using ApiClient updating an entire resource")
     @Story("HTTP Execution")
     @Severity(SeverityLevel.CRITICAL)
     @Description("Executes an HTTP PUT request replacing a resource and validates 200 response with updated data.")
@@ -112,7 +114,7 @@ public class ApiClientTest {
         assertThat(response.jsonPath().getDouble("price")).isEqualTo(39.99);
     }
 
-    @Test(description = "Verify PATCH execution using ApiClient updating a specific field")
+    @Test(groups = "integration", description = "Verify PATCH execution using ApiClient updating a specific field")
     @Story("HTTP Execution")
     @Severity(SeverityLevel.CRITICAL)
     @Description("Executes an HTTP PATCH request updating specific resource fields and validates 200 response.")
@@ -127,7 +129,7 @@ public class ApiClientTest {
         assertThat(response.jsonPath().getString("title")).isEqualTo("Patched Test Item Title");
     }
 
-    @Test(description = "Verify DELETE execution using ApiClient simulating resource deletion")
+    @Test(groups = "integration", description = "Verify DELETE execution using ApiClient simulating resource deletion")
     @Story("HTTP Execution")
     @Severity(SeverityLevel.CRITICAL)
     @Description("Executes an HTTP DELETE request simulating deletion and validates response flags.")
@@ -139,7 +141,7 @@ public class ApiClientTest {
         assertThat(response.jsonPath().getString("deletedOn")).isNotNull();
     }
 
-    @Test(description = "Verify query parameters, auth headers, and body secrets are redacted across tested logs and Allure")
+    @Test(groups = "integration", description = "Verify query parameters, auth headers, and body secrets are redacted across tested logs and Allure")
     @Story("Sensitive Data Protection")
     @Severity(SeverityLevel.BLOCKER)
     @Description("Performs a live request with sensitive query parameters, headers, and body secrets and verifies synthetic secret redaction across tested logging and reporting paths.")
@@ -233,75 +235,91 @@ public class ApiClientTest {
         }
     }
 
-    @Test(description = "Verify thread-safety and lack of cross-thread contamination during concurrent executions")
+    @Test(groups = "offline", description = "Verify thread-safety and lack of cross-thread contamination during concurrent executions")
     @Story("Concurrency & Thread Safety")
     @Severity(SeverityLevel.CRITICAL)
-    @Description("Simultaneously executes multiple threads through ApiClient to confirm thread safety and lack of cross-thread contamination.")
-    public void testConcurrentExecutionThreadSafety() throws InterruptedException {
-        int threadCount = 5;
-        ExecutorService executor = Executors.newFixedThreadPool(threadCount);
-        CountDownLatch startLatch = new CountDownLatch(1);
-        CountDownLatch doneLatch = new CountDownLatch(threadCount);
-        List<Integer> statusCodes = Collections.synchronizedList(new ArrayList<>());
-        List<Exception> errors = Collections.synchronizedList(new ArrayList<>());
-
-        for (int i = 0; i < threadCount; i++) {
-            executor.submit(() -> {
-                try {
-                    startLatch.await();
-                    Response resp = apiClient.get(EndpointConstants.TEST);
-                    statusCodes.add(resp.getStatusCode());
-                } catch (Exception e) {
-                    errors.add(e);
-                } finally {
-                    doneLatch.countDown();
+    @Description("Simultaneously executes multiple threads through ApiClient to confirm thread safety and that each response matches its distinct corresponding request.")
+    public void testConcurrentExecutionThreadSafety() throws Exception {
+        try (LocalHttpTestServer server = LocalHttpTestServer.createAndStart()) {
+            server.registerHandler("/api/concurrent-test", exchange -> {
+                String query = exchange.getRequestURI().getRawQuery();
+                String reqId = "unknown";
+                if (query != null && query.startsWith("requestId=")) {
+                    reqId = query.substring("requestId=".length());
+                }
+                byte[] responseBytes = ("{\"requestId\":\"" + reqId + "\",\"status\":\"ok\"}")
+                        .getBytes(java.nio.charset.StandardCharsets.UTF_8);
+                exchange.getResponseHeaders().set("Content-Type", "application/json");
+                exchange.sendResponseHeaders(200, responseBytes.length);
+                try (java.io.OutputStream os = exchange.getResponseBody()) {
+                    os.write(responseBytes);
                 }
             });
+
+            System.setProperty("base.url", server.getBaseUrl());
+            ConfigManager.reset();
+
+            int threadCount = 5;
+            ExecutorService executor = Executors.newFixedThreadPool(threadCount);
+            CountDownLatch startLatch = new CountDownLatch(1);
+            CountDownLatch doneLatch = new CountDownLatch(threadCount);
+            List<String> matchedIds = Collections.synchronizedList(new ArrayList<>());
+            List<Exception> errors = Collections.synchronizedList(new ArrayList<>());
+
+            for (int i = 0; i < threadCount; i++) {
+                final String expectedId = "req-" + i;
+                executor.submit(() -> {
+                    try {
+                        startLatch.await();
+                        Response resp = apiClient.get("/api/concurrent-test", Map.of("requestId", expectedId));
+                        if (resp.getStatusCode() != 200) {
+                            throw new IllegalStateException("Expected status 200, got: " + resp.getStatusCode());
+                        }
+                        String actualId = resp.jsonPath().getString("requestId");
+                        if (!expectedId.equals(actualId)) {
+                            throw new IllegalStateException("Cross-thread contamination: expected " + expectedId + ", got " + actualId);
+                        }
+                        matchedIds.add(actualId);
+                    } catch (Exception e) {
+                        errors.add(e);
+                    } finally {
+                        doneLatch.countDown();
+                    }
+                });
+            }
+
+            startLatch.countDown(); // Release all threads simultaneously
+            boolean completedInTime = doneLatch.await(15, TimeUnit.SECONDS);
+            executor.shutdown();
+
+            assertThat(completedInTime).as("All concurrent requests should complete within timeout").isTrue();
+            assertThat(errors).as("No threads should encounter errors during concurrent execution").isEmpty();
+            assertThat(matchedIds).hasSize(threadCount);
+            for (int i = 0; i < threadCount; i++) {
+                assertThat(matchedIds).contains("req-" + i);
+            }
+        } finally {
+            System.clearProperty("base.url");
+            ConfigManager.reset();
         }
-
-        startLatch.countDown(); // Release all threads simultaneously
-        boolean completedInTime = doneLatch.await(15, TimeUnit.SECONDS);
-        executor.shutdown();
-
-        assertThat(completedInTime).as("All concurrent requests should complete within timeout").isTrue();
-        assertThat(errors).as("No threads should encounter errors during concurrent execution").isEmpty();
-        assertThat(statusCodes).hasSize(threadCount);
-        assertThat(statusCodes).allMatch(code -> code == 200);
     }
 
-    @Test(description = "Verify runtime configuration override directs HTTP requests to the configured destination URL")
+    @Test(groups = "offline", description = "Verify runtime configuration override directs HTTP requests to the configured destination URL")
     @Story("Request Specification")
     @Severity(SeverityLevel.CRITICAL)
     @Description("Spins up a local HTTP test server, overrides base.url, and validates that ApiClient sends requests to the overridden destination URL.")
     public void testRuntimeConfigOverride() throws IOException {
-        com.sun.net.httpserver.HttpServer localServer = com.sun.net.httpserver.HttpServer.create(new java.net.InetSocketAddress(0), 0);
-        java.util.concurrent.atomic.AtomicBoolean requestReceived = new java.util.concurrent.atomic.AtomicBoolean(false);
-        java.util.concurrent.atomic.AtomicReference<String> requestedUri = new java.util.concurrent.atomic.AtomicReference<>();
+        try (LocalHttpTestServer localServer = LocalHttpTestServer.createAndStart()) {
+            localServer.registerJsonResponse("/api/override-test", 200, "{\"status\":\"override-ok\"}");
 
-        localServer.createContext("/api/override-test", exchange -> {
-            requestReceived.set(true);
-            requestedUri.set(exchange.getRequestURI().toString());
-            byte[] responseBytes = "{\"status\":\"override-ok\"}".getBytes(java.nio.charset.StandardCharsets.UTF_8);
-            exchange.getResponseHeaders().set("Content-Type", "application/json");
-            exchange.sendResponseHeaders(200, responseBytes.length);
-            try (java.io.OutputStream os = exchange.getResponseBody()) {
-                os.write(responseBytes);
-            }
-        });
-        localServer.start();
-
-        int port = localServer.getAddress().getPort();
-        String overrideUrl = "http://localhost:" + port;
-
-        try {
-            System.setProperty("base.url", overrideUrl);
+            System.setProperty("base.url", localServer.getBaseUrl());
             ConfigManager.reset();
 
             // 1. Verify RequestSpecFactory reflects the override base URI
             RequestSpecification spec = RequestSpecFactory.getDefaultRequestSpec();
             io.restassured.specification.FilterableRequestSpecification filterableSpec =
                     (io.restassured.specification.FilterableRequestSpecification) spec;
-            assertThat(filterableSpec.getBaseUri()).isEqualTo(overrideUrl);
+            assertThat(filterableSpec.getBaseUri()).isEqualTo(localServer.getBaseUrl());
 
             // 2. Execute actual request via ApiClient to verify network dispatch to overridden URL
             Response response = apiClient.get("/api/override-test");
@@ -309,12 +327,10 @@ public class ApiClientTest {
             assertThat(response.jsonPath().getString("status")).isEqualTo("override-ok");
 
             // 3. Confirm the local server actually received the request
-            assertThat(requestReceived.get())
-                    .as("Local server must have received request via overridden base URL")
-                    .isTrue();
-            assertThat(requestedUri.get()).isEqualTo("/api/override-test");
+            CapturedRequest lastReq = localServer.getLastRequest();
+            assertThat(lastReq).isNotNull();
+            assertThat(lastReq.getPath()).isEqualTo("/api/override-test");
         } finally {
-            localServer.stop(0);
             System.clearProperty("base.url");
             ConfigManager.reset();
         }

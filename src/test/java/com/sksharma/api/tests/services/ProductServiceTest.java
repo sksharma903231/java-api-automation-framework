@@ -18,11 +18,12 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 @Epic("E-Commerce API")
 @Feature("Product Catalog")
+@Test(groups = "integration")
 public class ProductServiceTest {
 
     private ProductService productService;
 
-    @BeforeClass
+    @BeforeClass(alwaysRun = true)
     public void setup() {
         productService = new ProductService();
     }

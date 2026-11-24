@@ -23,6 +23,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 @Epic("Security & Observability")
 @Feature("Listener Security")
+@Test(groups = "offline")
 public class TestExecutionListenerSecurityTest {
 
     private static final String SYNTHETIC_EXCEPTION_SECRET = "exception_secret_password_777_test";

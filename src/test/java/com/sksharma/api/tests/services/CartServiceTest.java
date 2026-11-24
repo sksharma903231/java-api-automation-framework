@@ -21,11 +21,12 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 @Epic("E-Commerce API")
 @Feature("Cart Operations")
+@Test(groups = "integration")
 public class CartServiceTest {
 
     private CartService cartService;
 
-    @BeforeClass
+    @BeforeClass(alwaysRun = true)
     public void setup() {
         cartService = new CartService();
     }

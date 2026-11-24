@@ -15,6 +15,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 @Epic("Security & Observability")
 @Feature("Sensitive Data Redaction")
+@Test(groups = "offline")
 public class SensitiveDataRedactionFilterTest {
 
     private static final String IDENTIFIABLE_SECRET = "secret_nested_token_99999_xyz";
