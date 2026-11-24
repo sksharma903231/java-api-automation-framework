@@ -39,58 +39,82 @@ Target API: [DummyJSON](https://dummyjson.com) (E-Commerce REST API).
 
 ## Architectural Overview
 
-The framework employs a strict layered architecture with loose coupling and high cohesion. No business logic leaks into the transport layer, and no test assertions reside in service classes.
+The framework employs a clean layered architecture with loose coupling and high cohesion. No business logic leaks into the transport layer, and no test assertions reside in service classes.
 
 ```mermaid
 flowchart TD
-    subgraph Test_Layer["Test Layer (TestNG + AssertJ)"]
-        TestClasses["Service Tests<br/>(Auth, User, Product, Cart)"]
-        SchemaTests["JSON Schema<br/>Validation Tests"]
-        CoreTests["Client, Config &<br/>Security Unit Tests"]
-        DataProvider["Data Providers<br/>(External JSON Files)"]
+    subgraph CI_CD["CI/CD & Quality Gates"]
+        GHA["GitHub Actions CI Pipeline<br/>(.github/workflows/api-tests.yml)"]
+        CS["Checkstyle 3.6.0<br/>(validate phase gate)"]
+        SB["SpotBugs 4.8.6.6<br/>(verify phase gate)"]
     end
 
-    subgraph Service_Layer["Service Layer (Business Operations)"]
+    subgraph Test_Layer["1. TestNG Test Classes"]
+        ServiceTests["Service Integration Tests<br/>(AuthServiceTest, UserServiceTest,<br/>ProductServiceTest, CartServiceTest)"]
+        OfflineTests["Offline HTTP Client Tests<br/>(ApiClientOfflineTest)"]
+        SchemaTests["Contract Schema Tests<br/>(JsonSchemaValidationTest)"]
+        SecurityTests["Security & Config Tests<br/>(SensitiveDataRedactionFilterTest,<br/>ConfigManagerTest, ListenerSecurityTest)"]
+    end
+
+    subgraph Supporting_Components["Supporting Components"]
+        ConfigMgr["ConfigManager<br/>(Thread-Safe Singleton, Precedence & URL Validation)"]
+        DTOs["DTOs & Models<br/>(Jackson JavaBeans & Java 21 Records)"]
+        SchemaFiles["JSON Schemas<br/>(Draft-07 Specifications)"]
+        Redaction["SensitiveDataRedactionFilter<br/>(AST Traversal, %26/%3D Handling & Safe Headers)"]
+        Listener["TestExecutionListener<br/>(Sanitized Allure Attachments)"]
+        Allure["Allure Reporting<br/>(Interactive HTML Report & Raw Results)"]
+    end
+
+    subgraph Service_Layer["2. Service Layer"]
         AuthSvc["AuthService"]
         UserSvc["UserService"]
         ProdSvc["ProductService"]
         CartSvc["CartService"]
     end
 
-    subgraph Model_Layer["Model Layer (Jackson DTOs)"]
-        Records["Immutable Records<br/>(LoginRequest)"]
-        POJOs["Standard Jackson JavaBean DTOs<br/>(User, Product, Cart, etc.)"]
+    subgraph Client_Layer["3. API Client Engine"]
+        ApiClient["ApiClient<br/>(Stateless HTTP Execution Methods)"]
     end
 
-    subgraph Core_Layer["Core Framework Layer"]
-        ApiClient["ApiClient<br/>(Stateless HTTP Execution)"]
-        ReqFactory["RequestSpecFactory<br/>(Base URI, Timeouts, Auth)"]
-        RespFactory["ResponseSpecFactory<br/>(Common Validations)"]
-        ConfigMgr["ConfigManager<br/>(Strict RFC Validation & Env Overrides)"]
+    subgraph Factory_Layer["4. Request / Response Specification Factories"]
+        ReqFactory["RequestSpecFactory<br/>(Base URI, Timeouts, Safe Defaults, Strict TLS)"]
+        RespFactory["ResponseSpecFactory<br/>(Reusable Shared Status & Type Expectations)"]
     end
 
-    subgraph Security_Layer["Security & Observability"]
-        RedactFilter["SensitiveDataRedactionFilter<br/>(Jackson AST Traversal & Safe Header Allowlist)"]
-        Log4j2["Log4j2 Logger<br/>(Redacted HTTP Wire Log)"]
-        AllureReport["Allure Report<br/>(Redacted Request/Response Attachments)"]
+    subgraph Transport_Layer["5. REST Assured Transport"]
+        RestAssured["REST Assured 5.5.0<br/>(HTTP Wire Dispatcher)"]
     end
 
-    subgraph External_Target["Target REST API"]
-        TargetAPI["DummyJSON Endpoints<br/>(https://dummyjson.com)"]
+    subgraph Execution_Targets["6. Execution Targets"]
+        LocalServer["LocalHttpTestServer<br/>(com.sun.net.httpserver.HttpServer - Ephemeral Port)"]
+        RemoteAPI["DummyJSON Remote REST API<br/>(https://dummyjson.com)"]
     end
 
-    DataProvider --> TestClasses
-    TestClasses --> Service_Layer
+    %% Flow connections
+    GHA --> CS
+    GHA --> Test_Layer
+    GHA --> SB
+    GHA --> Allure
+
+    ServiceTests --> Service_Layer
+    OfflineTests --> ApiClient
     SchemaTests --> Service_Layer
-    CoreTests --> Core_Layer
-    Service_Layer --> Model_Layer
+    SecurityTests --> Redaction
+
+    Service_Layer --> DTOs
     Service_Layer --> ApiClient
-    ApiClient --> ReqFactory
-    ReqFactory --> ConfigMgr
-    ApiClient --> RedactFilter
-    RedactFilter --> Log4j2
-    RedactFilter --> AllureReport
-    ApiClient --> External_Target
+    SchemaTests -.-> SchemaFiles
+
+    ApiClient --> Factory_Layer
+    Factory_Layer --> ConfigMgr
+    Factory_Layer --> Redaction
+
+    ApiClient --> Transport_Layer
+    Redaction --> Listener
+    Listener --> Allure
+
+    Transport_Layer -->|Offline Mode (-Poffline)| LocalServer
+    Transport_Layer -->|Integration Mode (-Pintegration)| RemoteAPI
 ```
 
 ---
@@ -164,21 +188,24 @@ api-automation-framework/
 │   └── test/
 │       ├── java/com/sksharma/api/tests/
 │       │   ├── clients/
-│       │   │   └── ApiClientTest.java          # HTTP client, concurrency & redaction tests
+│       │   │   ├── ApiClientOfflineTest.java   # Deterministic local server test suite (23 tests)
+│       │   │   └── ApiClientTest.java          # Core HTTP client, live endpoints & concurrency tests
 │       │   ├── config/
 │       │   │   └── ConfigManagerTest.java      # Configuration loading & URL validation tests
 │       │   ├── filters/
-│       │   │   └── SensitiveDataRedactionFilterTest.java # Sanitization unit tests
+│       │   │   └── SensitiveDataRedactionFilterTest.java # Sanitization unit tests (20 tests)
 │       │   ├── listeners/
 │       │   │   ├── TestExecutionListener.java  # TestNG lifecycle listener & sanitized Allure attachment
 │       │   │   └── TestExecutionListenerSecurityTest.java # Exception secret leak prevention tests
 │       │   ├── schemas/
-│       │   │   └── JsonSchemaValidationTest.java # JSON Schema validation tests
+│       │   │   └── JsonSchemaValidationTest.java # JSON Schema validation tests (live & offline)
 │       │   ├── services/
 │       │   │   ├── AuthServiceTest.java        # Authentication tests (positive & negative)
 │       │   │   ├── CartServiceTest.java        # Cart lifecycle & data-driven tests
 │       │   │   ├── ProductServiceTest.java     # Product catalog & search tests
 │       │   │   └── UserServiceTest.java        # User query, mutation & boundary tests
+│       │   ├── support/
+│       │   │   └── LocalHttpTestServer.java    # JDK HttpServer harness for offline HTTP testing
 │       │   └── utils/
 │       │       ├── TestCredentials.java        # Secure credential loader
 │       │       └── TestDataLoader.java         # Jackson external test data deserializer
@@ -326,8 +353,8 @@ To prevent SSRF and accidental misconfigurations, `ConfigManager` rejects:
 
 ### Clone & Build
 ```bash
-git clone https://github.com/sksharma/api-automation-framework.git
-cd api-automation-framework
+git clone https://github.com/sksharma903231/java-api-automation-framework.git
+cd java-api-automation-framework
 ```
 
 ### Run Full Test Suite & Quality Checks
@@ -398,15 +425,19 @@ Structured application logs are written to `logs/api-automation.log` and the sta
 
 The framework includes a fully automated GitHub Actions pipeline in [`.github/workflows/api-tests.yml`](.github/workflows/api-tests.yml):
 
-- **Triggers**: Pushes and Pull Requests targeting `main` or `master` branches, plus manual `workflow_dispatch`.
-- **Environment**: Ubuntu Linux with Eclipse Temurin JDK 21 and Maven caching.
-- **Workflow Steps**:
-  1. Check out repository code.
-  2. Set up JDK 21 with automatic Maven dependency caching.
-  3. Execute `mvn clean verify --batch-mode` (runs Checkstyle, SpotBugs, and all TestNG tests).
-  4. Generate Allure Report (`mvn allure:report`).
-  5. Archive Test Execution Artifacts (`target/surefire-reports/`, `logs/`, Checkstyle/SpotBugs reports) with 14-day retention.
-  6. Archive Allure HTML Report with 14-day retention.
+- **Execution Strategy Separation**:
+  - **Push & Pull Request (Default Gate)**: Runs `mvn clean verify -Poffline --batch-mode`. This executes the **59 offline tests**, Checkstyle, and SpotBugs against the local ephemeral HTTP server in a 100% deterministic environment with zero external network dependencies. Pull requests are never blocked by third-party API downtime.
+  - **Manual Trigger (`workflow_dispatch`)**: Enables on-demand execution with an interactive profile selection:
+    - `all` (default): Runs the complete test suite (**108 executions**: 59 offline + 49 integration).
+    - `offline`: Runs the deterministic offline suite (**59 executions**).
+    - `integration`: Runs the live DummyJSON suite (**49 executions**; requires internet connectivity).
+- **Environment**: Ubuntu Linux runner with Eclipse Temurin JDK 21 and automatic Maven dependency caching (`cache: 'maven'`).
+- **Security Posture**: Pinned to least-privilege `permissions: contents: read`. Inputs are safely mapped via environment variables to strict shell allowlists, preventing command injection.
+- **Fail-Safe Artifact Archiving (14-Day Retention)**:
+  - `test-execution-artifacts`: Surefire HTML/XML reports, sanitized application logs (`logs/api-automation.log`), Checkstyle report (`target/checkstyle-result.xml`), and SpotBugs report (`target/spotbugsXml.xml`).
+  - `allure-raw-results`: Raw test attachments and JSON metadata (`target/allure-results/`) for historical trend tracking.
+  - `allure-html-report`: Standalone interactive HTML report dashboard (`target/site/allure-maven-plugin/`).
+- **Failure Guarantees**: Any test failure or static analysis violation terminates the step with a non-zero exit code, permanently marking the workflow as failed. Post-test report generation and artifact uploads execute under `if: always()`, ensuring diagnostics are never lost.
 
 ---
 
