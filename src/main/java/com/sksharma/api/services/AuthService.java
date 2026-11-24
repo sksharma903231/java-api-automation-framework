@@ -32,6 +32,10 @@ public class AuthService {
         return login(new LoginRequest(username, password));
     }
 
+    public Response getAuthenticatedUserProfile() {
+        return apiClient.get(EndpointConstants.AUTH_ME);
+    }
+
     public Response getAuthenticatedUserProfile(String token) {
         RequestSpecification authSpec = RequestSpecFactory.getAuthenticatedRequestSpec(token);
         return apiClient.get(EndpointConstants.AUTH_ME, authSpec);

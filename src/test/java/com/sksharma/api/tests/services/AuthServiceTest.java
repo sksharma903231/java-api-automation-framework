@@ -1,5 +1,6 @@
 package com.sksharma.api.tests.services;
 
+import com.sksharma.api.clients.RequestSpecFactory;
 import com.sksharma.api.models.auth.LoginRequest;
 import com.sksharma.api.models.auth.LoginResponse;
 import com.sksharma.api.models.users.User;
@@ -12,6 +13,7 @@ import io.qameta.allure.Severity;
 import io.qameta.allure.SeverityLevel;
 import io.qameta.allure.Story;
 import io.restassured.response.Response;
+import io.restassured.specification.FilterableRequestSpecification;
 import org.testng.annotations.BeforeClass;
 import org.testng.annotations.DataProvider;
 import org.testng.annotations.Test;
@@ -107,5 +109,25 @@ public class AuthServiceTest {
 
         assertThat(response.getStatusCode()).isEqualTo(401);
         assertThat(response.jsonPath().getString("message")).containsIgnoringCase("token");
+    }
+
+    @Test(description = "Verify retrieving user profile without Authorization header returns 401 Unauthorized")
+    @Story("Negative Authentication")
+    @Severity(SeverityLevel.CRITICAL)
+    @Description("Ensures requests to /auth/me without an Authorization header are rejected with 401 Unauthorized and meaningful error.")
+    public void testGetProfileWithoutAuthHeaderReturns401() {
+        FilterableRequestSpecification defaultSpec =
+                (FilterableRequestSpecification) RequestSpecFactory.getDefaultRequestSpec();
+        assertThat(defaultSpec.getHeaders().hasHeaderWithName("Authorization"))
+                .as("Default RequestSpecification must not contain an Authorization header")
+                .isFalse();
+
+        Response response = authService.getAuthenticatedUserProfile();
+
+        assertThat(response.getStatusCode()).isEqualTo(401);
+        assertThat(response.jsonPath().getString("message"))
+                .as("Error response message must be meaningful and indicate missing authentication")
+                .isNotBlank()
+                .containsIgnoringCase("token");
     }
 }

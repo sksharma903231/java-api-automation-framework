@@ -102,6 +102,20 @@ public class ProductServiceTest {
         assertThat(anyMatch).as("At least one product should match search keyword '%s'", keyword).isTrue();
     }
 
+    @Test(description = "Verify product search with deliberately non-matching keyword returns empty product catalog")
+    @Story("Product Search")
+    @Severity(SeverityLevel.NORMAL)
+    @Description("Executes catalog search with a deliberately non-matching query keyword and validates that an empty product list with total zero is returned.")
+    public void testProductSearchWithNonMatchingKeywordReturnsEmpty() {
+        Response response = productService.searchProducts("deliberately_nonmatching_keyword_98765");
+
+        assertThat(response.getStatusCode()).isEqualTo(200);
+
+        ProductResponse productResponse = response.as(ProductResponse.class);
+        assertThat(productResponse.getProducts()).isEmpty();
+        assertThat(productResponse.getTotal()).isZero();
+    }
+
     @Test(description = "Verify simulated product creation returns created product with assigned ID")
     @Story("Product Creation")
     @Severity(SeverityLevel.CRITICAL)
