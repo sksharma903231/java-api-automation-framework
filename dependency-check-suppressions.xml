@@ -43,4 +43,30 @@
         <packageUrl regex="true">^pkg:maven/org\.mozilla/rhino@.*$</packageUrl>
         <cve>CVE-2016-10764</cve>
     </suppress>
+
+    <!--
+      CVE-2026-33166 concerns the Allure Report generator runtime (fixed in 2.38.0).
+      allure-model and allure-testng are Java client-side test adapters containing only
+      result model POJOs and TestNG execution listeners, not report generation code.
+      The report generator is configured with reportVersion 2.38.0 in allure-maven.
+    -->
+    <suppress>
+        <notes><![CDATA[
+            Suppression for CVE-2026-33166 on allure-model. The artifact contains only test
+            model POJOs and does not contain the Allure report generator implementation.
+            The report generator is configured as patched version 2.38.0 in allure-maven.
+        ]]></notes>
+        <packageUrl regex="true">^pkg:maven/io\.qameta\.allure/allure-model@.*$</packageUrl>
+        <cve>CVE-2026-33166</cve>
+    </suppress>
+
+    <suppress>
+        <notes><![CDATA[
+            Suppression for CVE-2026-33166 on allure-testng. The artifact contains only TestNG
+            execution listeners and does not contain the Allure report generator implementation.
+            The report generator is configured as patched version 2.38.0 in allure-maven.
+        ]]></notes>
+        <packageUrl regex="true">^pkg:maven/io\.qameta\.allure/allure-testng@.*$</packageUrl>
+        <cve>CVE-2026-33166</cve>
+    </suppress>
 </suppressions>

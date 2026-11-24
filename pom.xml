@@ -19,11 +19,12 @@
         <rest-assured.version>5.5.0</rest-assured.version>
         <testng.version>7.10.2</testng.version>
         <jackson.version>2.18.8</jackson.version>
-        <allure.version>2.29.0</allure.version>
+        <allure.version>2.35.6</allure.version>
         <allure.report.version>2.38.0</allure.report.version>
         <log4j.version>2.25.4</log4j.version>
         <slf4j.version>2.0.16</slf4j.version>
         <assertj.version>3.27.7</assertj.version>
+        <rhino.version>1.7.15.1</rhino.version>
 
         <!-- Maven Plugins -->
         <maven-compiler-plugin.version>3.13.0</maven-compiler-plugin.version>
@@ -45,6 +46,13 @@
             <groupId>io.rest-assured</groupId>
             <artifactId>json-schema-validator</artifactId>
             <version>${rest-assured.version}</version>
+            <scope>test</scope>
+        </dependency>
+        <!-- Patched Rhino for JSON Schema Validator (resolves CVE-2025-66453) -->
+        <dependency>
+            <groupId>org.mozilla</groupId>
+            <artifactId>rhino</artifactId>
+            <version>${rhino.version}</version>
             <scope>test</scope>
         </dependency>
 
