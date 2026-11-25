@@ -182,12 +182,12 @@ Configuration values are resolved using the following order of precedence:
 | `base.url` | `https://dummyjson.com` | Base target URL for HTTP requests. |
 | `http.timeout.seconds` | `10` | Socket and connection timeout (accepted range: 1–300s). |
 | `logging.include.body` | `false` | When `true`, logs redacted JSON request and response bodies. |
-| `api.mode` / `test.profile` | `offline` | Execution mode: `offline` or `integration`. |
-| `api.allowed.hosts` | `dummyjson.com` | Comma-separated list of permitted external hosts in integration mode. |
+| `api.mode` / `test.profile` | Not set in `config.properties` | Optional execution mode: `offline` or `integration`; Maven profiles set `test.profile`. Without an explicit profile, the full suite runs. |
+| `allowed.hosts` | `dummyjson.com,staging.dummyjson.com` | Comma-separated list of permitted external hosts in integration mode. |
 
 ### Execution Mode Rules
 - `offline`: Restricts target destinations strictly to loopback addresses (`localhost`, `127.0.0.1`, `::1`). External network calls trigger an `IllegalStateException` before socket creation.
-- `integration`: Allows external destinations provided their host is explicitly allowlisted in `api.allowed.hosts`.
+- `integration`: Allows external destinations provided their host is explicitly allowlisted in `allowed.hosts`.
 
 ---
 
