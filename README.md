@@ -36,7 +36,10 @@ A modular REST API test automation framework built with Java 21, REST Assured, T
 | Code Conventions | Checkstyle Maven Plugin | 3.6.0 | Style and static code convention checks |
 | Static Analysis | SpotBugs Maven Plugin | 4.8.6.6 | Bytecode analysis for security and concurrency bugs |
 | Vulnerability Scanner | OWASP Dependency-Check | 12.2.2 | Software composition analysis and CVE scanning |
-| Build Plugin | Maven Compiler Plugin | 3.13.0 | Compiles against Java 21 |\n| Test Plugin | Maven Surefire Plugin | 3.5.2 | Executes TestNG suites |\n| Reporting Plugin | Allure Maven Plugin | 2.15.2 (report 2.38.0) | Generates the Allure HTML report |\n| CI Engine | GitHub Actions | Ubuntu Latest | Automated continuous integration pipeline |
+| Build Plugin | Maven Compiler Plugin | 3.13.0 | Compiles against Java 21 |
+| Test Plugin | Maven Surefire Plugin | 3.5.2 | Executes TestNG suites |
+| Reporting Plugin | Allure Maven Plugin | 2.15.2 (report 2.38.0) | Generates the Allure HTML report |
+| CI Engine | GitHub Actions | Ubuntu Latest | Automated continuous integration pipeline |
 
 ---
 
