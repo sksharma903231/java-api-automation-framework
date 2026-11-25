@@ -1,3 +1,5 @@
+[![API Regression Suite](https://github.com/sksharma903231/java-api-automation-framework/actions/workflows/api-tests.yml/badge.svg)](https://github.com/sksharma903231/java-api-automation-framework/actions/workflows/api-tests.yml)
+
 # Java API Automation Framework
 
 A modular REST API test automation framework built with Java 21, REST Assured, TestNG, Jackson, and Allure. The framework automates testing for authentication, users, products, and carts against the DummyJSON REST API, incorporating deterministic offline local mock testing, sensitive field redaction, and static analysis quality gates.
@@ -26,15 +28,15 @@ A modular REST API test automation framework built with Java 21, REST Assured, T
 | Build Tool | Apache Maven | 3.9+ | Dependency resolution and build lifecycle management |
 | HTTP Client | REST Assured | 5.5.0 | Fluent REST API test harness |
 | Test Runner | TestNG | 7.10.2 | Test execution, suite grouping, and parallelization |
-| Object Mapping | Jackson Databind | 2.18.2 | JSON serialization, deserialization, and AST parsing |
-| Assertions | AssertJ | 3.27.3 | Fluent assertion library |
+| Object Mapping | Jackson Databind | 2.18.9 | JSON serialization, deserialization, and AST parsing |
+| Assertions | AssertJ | 3.27.7 | Fluent assertion library |
 | Schema Validation | JSON Schema Validator | 5.5.0 | Draft-07 JSON Schema compliance verification |
-| Reporting | Allure TestNG | 2.29.0 | Test lifecycle logging and sanitized attachments |
-| Logging | Log4j2 + SLF4J | 2.24.3 / 2.0.16 | Structured console and file logging |
+| Reporting | Allure TestNG | 2.35.6 | Test lifecycle logging and sanitized attachments |
+| Logging | Log4j2 + SLF4J | 2.25.5 / 2.0.16 | Structured console and file logging |
 | Code Conventions | Checkstyle Maven Plugin | 3.6.0 | Style and static code convention checks |
 | Static Analysis | SpotBugs Maven Plugin | 4.8.6.6 | Bytecode analysis for security and concurrency bugs |
-| Vulnerability Scanner | OWASP Dependency-Check | 12.1.0 | Software composition analysis and CVE scanning |
-| CI Engine | GitHub Actions | Ubuntu Latest | Automated continuous integration pipeline |
+| Vulnerability Scanner | OWASP Dependency-Check | 12.2.2 | Software composition analysis and CVE scanning |
+| Static Analysis | Checkstyle Maven Plugin | 3.6.0 | Java code convention checks |\n| Static Analysis | SpotBugs Maven Plugin | 4.8.6.6 | Bytecode analysis for potential defects |\n| Build Plugin | Maven Compiler Plugin | 3.13.0 | Compiles against Java 21 |\n| Test Plugin | Maven Surefire Plugin | 3.5.2 | Executes TestNG suites |\n| Reporting Plugin | Allure Maven Plugin | 2.15.2 | Generates the Allure HTML report |\n| CI Engine | GitHub Actions | Ubuntu Latest | Automated continuous integration pipeline |
 
 ---
 
@@ -194,7 +196,7 @@ Offline tests execute against `LocalHttpTestServer` with zero external network c
 mvn clean verify -Poffline
 ```
 
-This command runs the 115 offline test executions, validates code style via Checkstyle, and performs bytecode analysis via SpotBugs.
+The latest verified offline GitHub Actions run executed 115 tests with zero failures, errors, or skips. The command also validates code style via Checkstyle and performs bytecode analysis via SpotBugs.
 
 ---
 
@@ -203,10 +205,10 @@ This command runs the 115 offline test executions, validates code style via Chec
 Integration tests run live service operations, schema verifications, and data-driven scenarios against DummyJSON. Active internet connectivity is required.
 
 ```bash
-# Run integration tests against DummyJSON (49 executions)
+# Run integration tests against DummyJSON
 mvn clean verify -Pintegration
 
-# Run complete test suite (both offline and integration suites, 164 executions)
+# Run complete test suite (offline and integration suites)
 mvn clean verify
 ```
 
@@ -259,7 +261,7 @@ mvn dependency-check:check -DNVD_API_KEY=your_nvd_api_key
 
 Continuous integration is automated via GitHub Actions in [`.github/workflows/api-tests.yml`](.github/workflows/api-tests.yml):
 
-- **Push and Pull Request Gate**: Executes `mvn clean verify -Poffline --batch-mode` across all pull requests and pushes to `main` and `master`, providing deterministic testing without third-party API dependencies.
+- **Push and Pull Request Gate**: Executes `mvn clean verify -Poffline --batch-mode` across all pull requests and pushes to `main` and `master`, providing deterministic testing without third-party API dependencies. The latest verified [push run](https://github.com/sksharma903231/java-api-automation-framework/actions/runs/45458392627) completed successfully: 115 offline tests passed, and the separate dependency vulnerability scan also succeeded. This run verifies the offline profile, not the live integration profile.
 - **Manual Execution (`workflow_dispatch`)**: Supports manual trigger with profile selection (`all`, `offline`, or `integration`).
 - **Security Hardening**:
   - Third-party actions pinned to immutable commit SHAs (`actions/checkout@11bd719`, `actions/setup-java@3a4f6e1`, `actions/upload-artifact@4cec3d8`).
